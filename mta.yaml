@@ -1,0 +1,54 @@
+_schema-version: "3.2"
+ID: inoxgfl-vendor-portal
+version: 1.0.0
+description: A Fiori-like Vendor Portal for SAP BTP
+
+parameters:
+  enable-parallel-deployments: true
+
+modules:
+  - name: inoxgfl-approuter
+    type: nodejs
+    path: approuter
+    build-parameters:
+      builder: zip
+    parameters:
+      disk-quota: 256M
+      memory: 256M
+    requires:
+      - name: inoxgfl-xsuaa
+      - name: inoxgfl-destination
+      - name: srv-api
+        group: destinations
+        properties:
+          name: srv-api
+          url: ~{url}
+          forwardAuthToken: true
+
+  - name: inoxgfl-backend
+    type: nodejs
+    path: backend
+    build-parameters:
+      builder: zip
+    provides:
+      - name: srv-api
+        properties:
+          url: ${default-url}
+    requires:
+      - name: inoxgfl-xsuaa
+      - name: inoxgfl-destination
+      - name: inoxgfl-connectivity
+
+resources:
+  - name: inoxgfl-xsuaa
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: xsuaa
+      service-plan: application
+      path: ./xs-security.json
+
+  - name: inoxgfl-destination
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: destination
+      service-plan: lite

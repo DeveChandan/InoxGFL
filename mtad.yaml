@@ -1,0 +1,65 @@
+_schema-version: "3.1"
+ID: inoxgfl-vendor-portal
+description: InoxGFL Vendor Portal App
+version: 1.0.0
+modules:
+- name: inoxgfl-approuter
+  type: javascript.nodejs
+  path: inoxgfl-approuter
+  requires:
+  - name: inoxgfl-xsuaa
+  - name: inoxgfl-destination
+  - name: inoxgfl-html5-repo-runtime
+  - name: srv-api
+    group: destinations
+    properties:
+      forwardAuthToken: true
+      name: srv-api
+      url: ~{srv-url}
+  parameters:
+    disk-quota: 256M
+    memory: 256M
+- name: inoxgfl-backend
+  type: javascript.nodejs
+  path: inoxgfl-backend
+  requires:
+  - name: inoxgfl-xsuaa
+  - name: inoxgfl-destination
+  provides:
+  - name: srv-api
+    properties:
+      srv-url: ${default-url}
+  parameters:
+    disk-quota: 512M
+    memory: 256M
+- name: inoxgfl-frontend-deployer
+  type: com.sap.application.content
+  path: inoxgfl-frontend-deployer
+  requires:
+  - name: inoxgfl-html5-repo-host
+    parameters:
+      content-target: true
+resources:
+- name: inoxgfl-xsuaa
+  type: org.cloudfoundry.managed-service
+  parameters:
+    path: ./xs-security.json
+    service: xsuaa
+    service-plan: application
+- name: inoxgfl-destination
+  type: org.cloudfoundry.managed-service
+  parameters:
+    service: destination
+    service-plan: lite
+- name: inoxgfl-html5-repo-host
+  type: org.cloudfoundry.managed-service
+  parameters:
+    service: html5-apps-repo
+    service-plan: app-host
+- name: inoxgfl-html5-repo-runtime
+  type: org.cloudfoundry.managed-service
+  parameters:
+    service: html5-apps-repo
+    service-plan: app-runtime
+parameters:
+  enable-parallel-deployments: true

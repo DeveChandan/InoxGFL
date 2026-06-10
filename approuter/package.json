@@ -1,0 +1,11 @@
+{
+  "name": "inoxgfl-approuter",
+  "version": "1.0.0",
+  "description": "SAP Approuter for InoxGFL Vendor Portal",
+  "scripts": {
+    "start": "node node_modules/@sap/approuter/approuter.js"
+  },
+  "dependencies": {
+    "@sap/approuter": "^16.4.0"
+  }
+}

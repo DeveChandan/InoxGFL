@@ -1,0 +1,339 @@
+import { Request, Response } from 'express';
+import { s4hanaRequest } from '../services/s4hana';
+
+interface AuthRequest extends Request {
+  user?: any;
+}
+
+const parseSAPDate = (dateField: string) => {
+  if (!dateField) return new Date(0);
+  if (dateField.includes('Date(')) {
+    return new Date(parseInt(dateField.match(/\d+/)?.[0] || '0', 10));
+  }
+  return new Date(dateField);
+};
+
+export const getTodayStatus = async (req: AuthRequest, res: Response) => {
+  try {
+    const userEmail = req.user?.email || req.body.email || '';
+    const jwtToken = req.headers.authorization?.split(' ')[1];
+    
+    // Fetch records
+    const response = await s4hanaRequest('GET', `/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/AttendanceSet?$filter=Email eq '${userEmail}'`, undefined, undefined, jwtToken);
+    
+    let records = response.d && response.d.results ? response.d.results : [];
+    
+    // Manual filter fallback for ABAP bug
+    records = records.filter((r: any) => r.Email?.toLowerCase() === userEmail.toLowerCase());
+
+    // Filter for TODAY's records
+    const todayStr = new Date().toISOString().split('T')[0];
+    const todaysRecords = records.filter((r: any) => (r.Timestamp || '').startsWith(todayStr));
+
+    const inRecord = todaysRecords.find((r: any) => r.Type === 'IN');
+    const outRecord = todaysRecords.find((r: any) => r.Type === 'OUT');
+
+    let currentStatus = 'not_started';
+    let attendanceData = null;
+    
+    const formatTimeForUI = (dateStr: string, timeStr: string) => {
+      // timeStr might be like "PT09H30M00S"
+      if (!timeStr) return dateStr;
+      
+      let hours = "00", mins = "00", secs = "00";
+      const match = timeStr.match(/PT(\d+H)?(\d+M)?(\d+S)?/);
+      if (match) {
+        if (match[1]) hours = match[1].replace('H', '').padStart(2, '0');
+        if (match[2]) mins = match[2].replace('M', '').padStart(2, '0');
+        if (match[3]) secs = match[3].replace('S', '').padStart(2, '0');
+      }
+      return `${dateStr}T${hours}:${mins}:${secs}`;
+    };
+
+    if (inRecord && outRecord) {
+      currentStatus = 'completed';
+      attendanceData = {
+        clock_in_time: formatTimeForUI(inRecord.Timestamp, inRecord.Worktime),
+        clock_out_time: formatTimeForUI(outRecord.Timestamp, outRecord.Worktime),
+        readable_location: inRecord.Readablelocation || inRecord.readable_location
+      };
+    } else if (inRecord) {
+      currentStatus = 'working';
+      attendanceData = {
+        clock_in_time: formatTimeForUI(inRecord.Timestamp, inRecord.Worktime),
+        readable_location: inRecord.Readablelocation || inRecord.readable_location,
+        hidden_location: inRecord.Hiddenloaction || inRecord.hidden_location
+      };
+    }
+
+    res.json({ status: currentStatus, attendance: attendanceData });
+  } catch (error: any) {
+    console.error('getTodayStatus Error:', error);
+    res.status(500).json({ message: 'Error fetching attendance status', error: error.message });
+  }
+};
+
+export const clockIn = async (req: AuthRequest, res: Response) => {
+  try {
+    const a = req.body;
+    const now = new Date();
+    const formattedTimestamp = now.toISOString().split('T')[0]; // YYYY-MM-DD
+    const workTime = `PT${String(now.getHours()).padStart(2, '0')}H${String(now.getMinutes()).padStart(2, '0')}M${String(now.getSeconds()).padStart(2, '0')}S`;
+    
+    const payload = {
+      Eventid: a.id || a.event_id || "",
+      Email: req.user?.email || a.email || "",
+      Type: 'IN',
+      Timestamp: formattedTimestamp,
+      Worktime: workTime,
+      Isexception: "",
+      Status: "APPROVED",
+      Hoursworked: "0",
+      Currentapprover: "",
+      Ipaddress: a.ip_address || a.Ipaddress || "",
+      Ossystem: a.os_system || a.Ossystem || "",
+      Hiddenloaction: a.hidden_location || a.Hiddenloaction || "",
+      Readablelocation: a.readable_location || a.Readablelocation || "",
+      Manuallocation: a.manual_location || a.Manuallocation || "",
+      Macaddress: a.mac_address || a.Macaddress || ""
+    };
+    const response = await s4hanaRequest('POST', '/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/AttendanceSet', payload);
+    res.json({ message: 'Clocked In successfully', data: response.d || response });
+  } catch (error: any) {
+    console.error('clockIn Error:', error);
+    res.status(500).json({ message: 'Error clocking in', error: error.message });
+  }
+};
+
+export const clockOut = async (req: AuthRequest, res: Response) => {
+  try {
+    const a = req.body;
+    const userEmail = req.user?.email || a.email || "";
+    const jwtToken = req.headers.authorization?.split(' ')[1];
+    
+    // VALIDATION: Check if worksheet is submitted for today
+    try {
+      const wsResponse = await s4hanaRequest('GET', `/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/WorksheetsSet`, undefined, undefined, jwtToken);
+      let rawWorksheets = wsResponse.d && wsResponse.d.results ? wsResponse.d.results : (wsResponse.d ? [wsResponse.d] : (Array.isArray(wsResponse) ? wsResponse : []));
+      let worksheets = rawWorksheets.filter((w: any) => (w.Email || w.email || '').toLowerCase().trim() === userEmail.toLowerCase().trim());
+      
+      const todayStr = new Date().toISOString().split('T')[0];
+      const todaysWorksheet = worksheets.find((w: any) => {
+        const d = parseSAPDate(w.Workdate || w.date);
+        return d.toISOString().split('T')[0] === todayStr;
+      });
+      
+      if (!todaysWorksheet) {
+        console.warn(`Worksheet missing for user ${userEmail} on ${todayStr}. Found worksheets:`, JSON.stringify(worksheets));
+        return res.status(400).json({ requiresWorksheet: true, message: `Debug Info - Total raw worksheets: ${rawWorksheets.length}, Target Email: '${userEmail}', Emails in DB: ${JSON.stringify(rawWorksheets.map((w: any) => w.Email || w.email))}` });
+      }
+    } catch (wsErr) {
+      console.warn("Worksheet check failed, proceeding anyway or handle error", wsErr);
+    }
+
+    const now = new Date();
+    const formattedTimestamp = now.toISOString().split('T')[0]; // YYYY-MM-DD
+    const workTime = `PT${String(now.getHours()).padStart(2, '0')}H${String(now.getMinutes()).padStart(2, '0')}M${String(now.getSeconds()).padStart(2, '0')}S`;
+    
+    const payload = {
+      Eventid: a.id || a.event_id || "",
+      Email: userEmail,
+      Type: 'OUT',
+      Timestamp: formattedTimestamp,
+      Worktime: workTime,
+      Isexception: "",
+      Status: "APPROVED",
+      Hoursworked: "0",
+      Currentapprover: "",
+      Ipaddress: a.ip_address || a.Ipaddress || "",
+      Ossystem: a.os_system || a.Ossystem || "",
+      Hiddenloaction: a.hidden_location || a.Hiddenloaction || "",
+      Readablelocation: a.readable_location || a.Readablelocation || "",
+      Manuallocation: a.manual_location || a.Manuallocation || "",
+      Macaddress: a.mac_address || a.Macaddress || ""
+    };
+    const response = await s4hanaRequest('POST', '/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/AttendanceSet', payload);
+    res.json({ message: 'Clocked Out successfully', data: response.d || response });
+  } catch (error: any) {
+    console.error('clockOut Error:', error);
+    res.status(500).json({ message: 'Error clocking out', error: error.message });
+  }
+};
+
+export const getAttendance = async (req: AuthRequest, res: Response) => {
+  try {
+    const jwtToken = req.headers.authorization?.split(' ')[1];
+    const response = await s4hanaRequest('GET', '/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/AttendanceSet', undefined, undefined, jwtToken);
+    
+    const rawAttendance = response.d?.results || response.d || response || [];
+    const mappedAttendance = (Array.isArray(rawAttendance) ? rawAttendance : [rawAttendance]).map((a: any) => ({
+      id: a.Eventid || a.id || a.event_id,
+      email: a.Email || a.email,
+      type: a.Type || a.type,
+      timestamp: a.Timestamp || a.timestamp,
+      worktime: a.Worktime,
+      is_exception: a.Isexception,
+      status: a.Status,
+      hours_worked: a.Hoursworked,
+      current_approver: a.Currentapprover,
+      ip_address: a.Ipaddress || a.ip_address,
+      os_system: a.Ossystem || a.os_system,
+      hidden_location: a.Hiddenloaction || a.Hiddenlocation || a.hidden_location,
+      readable_location: a.Readablelocation || a.readable_location,
+      manual_location: a.Manuallocation || a.manual_location,
+      mac_address: a.Macaddress || a.mac_address
+    }));
+
+    res.json({ message: 'Success', attendance: mappedAttendance });
+  } catch (error: any) {
+    console.error('getAttendance Error:', error);
+    res.status(500).json({ message: 'Error fetching attendance from S/4HANA', error: error.message });
+  }
+};
+
+export const submitAttendance = async (req: AuthRequest, res: Response) => {
+  try {
+    const attendanceData = req.body;
+    const jwtToken = req.headers.authorization?.split(' ')[1];
+    // Add default values for new S/4HANA fields
+    const payload = {
+      ...attendanceData,
+      Worktime: attendanceData.Worktime || "PT00H00M00S",
+      Isexception: attendanceData.Isexception || "X",
+      Status: attendanceData.Status || "PENDING",
+      Hoursworked: attendanceData.Hoursworked || "0",
+      Currentapprover: attendanceData.Currentapprover || ""
+    };
+    const response = await s4hanaRequest('POST', '/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/AttendanceSet', payload, undefined, jwtToken);
+    res.json({ message: 'Attendance submitted successfully to S/4HANA', data: response.d || response });
+  } catch (error: any) {
+    console.error('submitAttendance Error:', error);
+    res.status(500).json({ message: 'Error recording exception', error: error.message });
+  }
+};
+
+export const getAttendanceRange = async (req: AuthRequest, res: Response) => {
+  try {
+    const { userId } = req.params;
+    const { start_date, end_date } = req.query;
+    const jwtToken = req.headers.authorization?.split(' ')[1];
+    
+    // Fetch all attendance and worksheets, then filter
+    const [attRes, wsRes] = await Promise.all([
+      s4hanaRequest('GET', '/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/AttendanceSet', undefined, undefined, jwtToken),
+      s4hanaRequest('GET', '/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/WorksheetsSet', undefined, undefined, jwtToken)
+    ]);
+    
+    let attendance = attRes.d?.results || attRes.d || [];
+    if (!Array.isArray(attendance)) attendance = [attendance];
+    
+    let worksheets = wsRes.d?.results || wsRes.d || [];
+    if (!Array.isArray(worksheets)) worksheets = [worksheets];
+
+    // Filter by Email (userId is Email after our user mapping)
+    const userEmail = (userId || '').toLowerCase();
+    attendance = attendance.filter((a: any) => (a.Email || a.email || '').toLowerCase() === userEmail);
+    worksheets = worksheets.filter((w: any) => (w.Email || w.email || '').toLowerCase() === userEmail);
+
+    // Group Attendance
+    const attMap: any = {};
+    attendance.forEach((a: any) => {
+      const aDate = a.Timestamp || a.timestamp;
+      if (!aDate) return;
+      if (!attMap[aDate]) {
+        attMap[aDate] = { work_date: aDate, manual_location: a.Manuallocation || a.manual_location || "" };
+      }
+      if (a.Type === 'IN') attMap[aDate].clock_in_time = a.Worktime; // Keep raw for frontend to parse or format
+      if (a.Type === 'OUT') attMap[aDate].clock_out_time = a.Worktime;
+    });
+
+    worksheets.forEach((w: any) => {
+      const wDate = parseSAPDate(w.Workdate || w.date).toISOString().split('T')[0];
+      if (attMap[wDate]) {
+        attMap[wDate].worksheet = { tasks_description: w.Taskdescription || w.task_description || w.tasks_description || "" };
+      }
+    });
+
+    let records = Object.values(attMap);
+    if (start_date) records = records.filter((r: any) => r.work_date >= start_date);
+    if (end_date) records = records.filter((r: any) => r.work_date <= end_date);
+
+    res.json({ message: 'Success', records });
+  } catch (error: any) {
+    console.error('getAttendanceRange Error:', error);
+    res.status(500).json({ message: 'Error fetching attendance logs', error: error.message });
+  }
+};
+
+export const addExceptionAttendance = async (req: AuthRequest, res: Response) => {
+  try {
+    const { target_user_id, records } = req.body;
+    const jwtToken = req.headers.authorization?.split(' ')[1];
+    
+    if (!target_user_id || !records || !Array.isArray(records)) {
+      return res.status(400).json({ message: 'Invalid payload' });
+    }
+    
+    // Process each exception record sequentially
+    for (const r of records) {
+      const workDateStr = r.work_date;
+      
+      // Submit Clock IN
+      if (r.clock_in_time) {
+        const inPayload = {
+          Email: target_user_id, // target_user_id is the email
+          Type: 'IN',
+          Timestamp: workDateStr,
+          Worktime: `PT${r.clock_in_time.split(':')[0]}H${r.clock_in_time.split(':')[1]}M00S`,
+          Isexception: "X",
+          Status: "PENDING",
+          Hoursworked: "0",
+          Currentapprover: "",
+          Manuallocation: r.manual_location || ""
+        };
+        await s4hanaRequest('POST', '/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/AttendanceSet', inPayload, undefined, jwtToken);
+      }
+      
+      // Submit Clock OUT
+      if (r.clock_out_time) {
+        const outPayload = {
+          Email: target_user_id,
+          Type: 'OUT',
+          Timestamp: workDateStr,
+          Worktime: `PT${r.clock_out_time.split(':')[0]}H${r.clock_out_time.split(':')[1]}M00S`,
+          Isexception: "X",
+          Status: "PENDING",
+          Hoursworked: "0",
+          Currentapprover: "",
+          Manuallocation: r.manual_location || ""
+        };
+        await s4hanaRequest('POST', '/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/AttendanceSet', outPayload, undefined, jwtToken);
+      }
+      
+      // Submit Worksheet
+      if (r.tasks_description) {
+        let wdStr = workDateStr;
+        if (!wdStr.includes('T')) {
+          wdStr = `${wdStr}T00:00:00`;
+        }
+        const wsPayload = {
+          Email: target_user_id,
+          Workdate: wdStr,
+          Taskdescription: r.tasks_description,
+          Hoursspent: "0",
+          Status: "PENDING"
+        };
+        try {
+          await s4hanaRequest('POST', '/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/WorksheetsSet', wsPayload, undefined, jwtToken);
+        } catch (wsErr) {
+           console.error("Worksheet POST failed for exception, might already exist or issue:", wsErr);
+        }
+      }
+    }
+    
+    res.json({ message: 'Exception records submitted successfully for approval' });
+  } catch (error: any) {
+    console.error('addExceptionAttendance Error:', error);
+    res.status(500).json({ message: 'Error recording exception', error: error.message });
+  }
+};

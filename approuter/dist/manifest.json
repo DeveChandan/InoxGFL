@@ -1,0 +1,16 @@
+{
+  "_version": "1.12.0",
+  "sap.app": {
+    "id": "com.inoxgfl.vendorportal",
+    "applicationVersion": {
+      "version": "1.0.0"
+    },
+    "title": "Vendor Portal",
+    "description": "InoxGFL Vendor Portal",
+    "type": "application"
+  },
+  "sap.cloud": {
+    "public": true,
+    "service": "inoxgfl-vendor-portal"
+  }
+}
