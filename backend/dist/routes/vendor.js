@@ -9,4 +9,5 @@ router.use(auth_1.authenticateJWT);
 // Only SUPER_ADMIN can manage vendors
 router.get('/', (0, auth_1.requireRole)(['SUPER_ADMIN']), vendor_1.getVendors);
 router.post('/', (0, auth_1.requireRole)(['SUPER_ADMIN']), vendor_1.createVendor);
+router.put('/:vendor_code/status', (0, auth_1.requireRole)(['SUPER_ADMIN']), vendor_1.updateVendorStatus);
 exports.default = router;

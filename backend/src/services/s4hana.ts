@@ -28,14 +28,12 @@ export const s4hanaRequest = async (
     // If it's a mutating request, fetch the CSRF token manually from the service root
     if (method !== 'GET') {
       try {
-        // Fetch the CSRF token using the EXACT entity path (e.g. /VendorSet)
-        // using a GET request. We append $top=1 to minimize data transfer if it's a large set.
-        const csrfUrl = path.includes('?') ? `${path}&$top=1` : `${path}?$top=1`;
+        const serviceRoot = path.split('/').slice(0, 6).join('/') + '/';
         const csrfResponse = await executeHttpRequest(
           destOptions,
           {
             method: 'GET',
-            url: csrfUrl,
+            url: serviceRoot,
             headers: {
               'x-csrf-token': 'fetch'
             }

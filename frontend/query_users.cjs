@@ -1,0 +1,28 @@
+const axios = require('axios');
+const jwt = require('jsonwebtoken');
+
+const BACKEND_URL = 'https://gujarat-fluorochemicals-limited-dev-rlttfpah-dev-inoxgf72169dad.cfapps.in30.hana.ondemand.com';
+const BEARER_TOKEN = 'Bearer eyJ0eXAiOiJKV1QiLCJqaWQiOiJwWWNxRDF6cDVaNVRSbXl1L2hTdmVMOE5tZ3JPTkNERE13WXh5c1JYaWFZPSIsImFsZyI6IlJTMjU2Iiwiamt1IjoiaHR0cHM6Ly9kZXYtcmx0dGZwYWguYXV0aGVudGljYXRpb24uaW4zMC5oYW5hLm9uZGVtYW5kLmNvbS90b2tlbl9rZXlzIiwia2lkIjoiZGVmYXVsdC1qd3Qta2V5LWMxNjkyMWJmZjgifQ.eyJzdWIiOiJlNmY1N2IyOC02MGI0LTQwOTUtOWY1Yi02MzAzYzZhOGZjODciLCJ4cy51c2VyLmF0dHJpYnV0ZXMiOnt9LCJ1c2VyX25hbWUiOiJ2aW5lZXQua3VtYXJAZ2ZsLmNvLmluIiwib3JpZ2luIjoic2FwLmRlZmF1bHQiLCJpc3MiOiJodHRwczovL2Rldi1ybHR0ZnBhaC5hdXRoZW50aWNhdGlvbi5pbjMwLmhhbmEub25kZW1hbmQuY29tL29hdXRoL3Rva2VuIiwieHMuc3lzdGVtLmF0dHJpYnV0ZXMiOnsieHMucm9sZWNvbGxlY3Rpb25zIjpbIlBJX0ludGVncmF0aW9uX0RldmVsb3BlciIsIlBJX1JlYWRfT25seSIsIlN1YmFjY291bnQgU2VydmljZSBBZG1pbmlzdHJhdG9yIiwiUElfQnVzaW5lc3NfRXhwZXJ0IiwiUElfQWRtaW5pc3RyYXRvciIsIlN1YmFjY291bnQgVmlld2VyIiwiQnVzaW5lc3NfQXBwbGljYXRpb25fU3R1ZGlvX0V4dGVuc2lvbl9EZXBsb3llciIsIkJ1c2luZXNzX0FwcGxpY2F0aW9uX1N0dWRpb19EZXZlbG9wZXIiLCJCdXNpbmVzc19BcHBsaWNhdGlvbl9TdHVkaW9fQWRtaW5pc3RyYXRvciIsIlN1YmFjY291bnQgQWRtaW5pc3RyYXRvciJdfSwiZ2l2ZW5fbmFtZSI6IlZpbmVldCIsImNsaWVudF9pZCI6InNiLWlub3hnZmwtdmVuZG9yLXBvcnRhbCF0OTkyMiIsImF1ZCI6WyJvcGVuaWQiLCJzYi1pbm94Z2ZsLXZlbmRvci1wb3J0YWwhdDk5MjIiXSwiZXh0X2F0dHIiOnsiZW5oYW5jZXIiOiJYU1VBQSIsInN1YmFjY291bnRpZCI6IjkxZTljMDEwLWEwMmMtNDc3NS05MzMxLWJmZGQwODI3ZWJjZCIsInpkbiI6ImRldi1ybHR0ZnBhaCJ9LCJ1c2VyX3V1aWQiOiI4ZTYzZWNlNi0xYmMyLTQ0ZGMtYWI3OS1lNWFjZGU1OTExMGIiLCJ6aWQiOiI5MWU5YzAxMC1hMDJjLTQ3NzUtOTMzMS1iZmRkMDgyN2ViY2QiLCJncmFudF90eXBlIjoiYXV0aG9yaXphdGlvbl9jb2RlIiwidXNlcl9pZCI6ImU2ZjU3YjI4LTYwYjQtNDA5NS05ZjViLTYzMDNjNmE4ZmM4NyIsImF6cCI6InNiLWlub3hnZmwtdmVuZG9yLXBvcnRhbCF0OTkyMiIsInNjb3BlIjpbIm9wZW5pZCJdLCJhdXRoX3RpbWUiOjE3ODEyNTkyMDgsImV4cCI6MTc4MTMwMjQwOCwiZmFtaWx5X25hbWUiOiJLdW1hciIsImlhdCI6MTc4MTI1OTIwOCwianRpIjoiZWI4N2NmNGFhNDE4NGYxNmFjYzMwMjAzZDMyYmYxYWQiLCJlbWFpbCI6InZpbmVldC5rdW1hckBnZmwuY28uaW4iLCJyZXZfc2lnIjoiNDhhOWYxZDYiLCJjaWQiOiJzYi1pbm94Z2ZsLXZlbmRvci1wb3J0YWwhdDk5MjIifQ.lquKRy9vt0r8kWAw7wacugnmGpeJOHS1z2WMYuslkWwL3BgzCFaOy3POB2vge_0cBTCqORsK9RM0bTXBht1OusG-2ntINkgDFwb5KZPgWryvWzpPQcrynmFwMA3BBKqCkQKa874DSws2OeBE9DFmzF0V4OrOgMfLocqK8oWXwXGZXkcQeTtHS3IAkIXjMgZkOa4lVawfSHYzDZAFG1isrPS6NnVua0Ejr8o36DbbEgynNJ_RXNpFSxAWwp4wBB0V2j7Nl4UiReBMJxJlACv3fPIKKaapKSroygtwenyitoJCATRUDAFBafhEZsLY2MV2EQDQi1hwdu5vGAQuRxfNtA';
+
+const secret = 'super_secret_jwt_key_inoxgfl_2026';
+const token = jwt.sign(
+  { email: 'vineet.kumar@gfl.co.in', role: 'SUPER_ADMIN', vendor_code: null },
+  secret,
+  { expiresIn: '1h' }
+);
+
+async function run() {
+  try {
+    const res = await axios.get(`${BACKEND_URL}/api/user`, {
+      headers: {
+        'Authorization': BEARER_TOKEN,
+        'x-inoxgfl-token': token
+      }
+    });
+    console.log('Users list:', JSON.stringify(res.data.users, null, 2));
+  } catch (err) {
+    console.error('Request failed:', err.response ? err.response.data : err.message);
+  }
+}
+
+run();

@@ -69,7 +69,19 @@ const VendorManagement = () => {
     }
   };
 
-  const activeVendorsCount = vendors.filter(v => v.status === 'active').length;
+  const handleToggleVendorStatus = async (vCode: string, currentStatus: string) => {
+    const isCurrentlyActive = (currentStatus || '').toLowerCase() === 'active';
+    const newStatus = isCurrentlyActive ? 'DEACTIVE' : 'ACTIVE';
+    try {
+      await api.put(`/vendor/${vCode}/status`, { status: newStatus });
+      fetchVendors();
+    } catch (err: any) {
+      console.error(err);
+      alert(err.response?.data?.message || 'Failed to update vendor status');
+    }
+  };
+
+  const activeVendorsCount = vendors.filter(v => (v.status || '').toLowerCase() === 'active').length;
 
   return (
     <div className="space-y-6">
@@ -204,6 +216,7 @@ const VendorManagement = () => {
                 <th className="p-4 font-semibold">Rate</th>
                 <th className="p-4 font-semibold">Status</th>
                 <th className="p-4 font-semibold">Total Employees</th>
+                <th className="p-4 font-semibold">Actions</th>
               </tr>
             </thead>
             <tbody className="text-sm">
@@ -227,15 +240,29 @@ const VendorManagement = () => {
                     <td className="p-4 text-slate-600">{vendor.rate ? `₹${vendor.rate}` : '-'}</td>
                     <td className="p-4">
                       <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${
-                        vendor.status === 'active' ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' : 
-                        'bg-slate-100 text-slate-700 border border-slate-200'
+                        (vendor.status || '').toLowerCase() === 'active' ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' : 
+                        'bg-rose-100 text-rose-700 border border-rose-200'
                       }`}>
-                        {vendor.status.toUpperCase()}
+                        {(vendor.status || 'ACTIVE').toUpperCase()}
                       </span>
                     </td>
-                    <td className="p-4 text-slate-700 font-medium flex items-center">
-                      <Users className="w-4 h-4 mr-2 text-slate-400" />
-                      {vendor.total_emp || vendor._count?.users || 0}
+                    <td className="p-4 text-slate-700 font-medium">
+                      <div className="flex items-center">
+                        <Users className="w-4 h-4 mr-2 text-slate-400" />
+                        {vendor.total_emp || 0}
+                      </div>
+                    </td>
+                    <td className="p-4">
+                      <button
+                        onClick={() => handleToggleVendorStatus(vendor.vendor_code, vendor.status)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold shadow-sm transition-colors border ${
+                          (vendor.status || '').toLowerCase() === 'active'
+                            ? 'bg-rose-50 hover:bg-rose-100 text-rose-600 border-rose-200'
+                            : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-600 border-emerald-200'
+                        }`}
+                      >
+                        {(vendor.status || '').toLowerCase() === 'active' ? 'Deactivate' : 'Activate'}
+                      </button>
                     </td>
                   </tr>
                 ))

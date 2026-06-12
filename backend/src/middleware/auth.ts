@@ -18,7 +18,8 @@ export const authenticateJWT = (req: AuthRequest, res: Response, next: NextFunct
       req.user = req.user || {};
       req.user.role = decoded.role;
       req.user.email = decoded.email;
-      console.log('[Auth Middleware] Successfully verified custom token. Role:', req.user.role);
+      req.user.vendor_code = decoded.vendor_code;
+      console.log('[Auth Middleware] Successfully verified custom token. Role:', req.user.role, 'VendorCode:', req.user.vendor_code);
       return next();
     } catch (e: any) {
       console.warn('[Auth Middleware] Invalid custom token, error:', e.message);

@@ -283,10 +283,10 @@ const MISReport = () => {
                         {formatDate(row.work_date)}
                       </div>
                       <span className={`mt-1 inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                        row.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : 
+                        (row.status || '').toLowerCase() === 'completed' ? 'bg-emerald-100 text-emerald-700' : 
                         'bg-yellow-100 text-yellow-700'
                       }`}>
-                        {row.status.toUpperCase()}
+                        {(row.status || 'WORKING').toUpperCase()}
                       </span>
                     </td>
                     {(user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN' || user?.role === 'VENDOR_ADMIN') && (

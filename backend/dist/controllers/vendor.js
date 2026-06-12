@@ -9,28 +9,44 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.createVendor = exports.getVendors = void 0;
+exports.updateVendorStatus = exports.createVendor = exports.getVendors = void 0;
 const s4hana_1 = require("../services/s4hana");
 const getVendors = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _a, _b, _c;
     try {
         const jwtToken = (_a = req.headers.authorization) === null || _a === void 0 ? void 0 : _a.split(' ')[1];
-        // ABAP URL Placeholder: /sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/VendorSet
-        const response = yield (0, s4hana_1.s4hanaRequest)('GET', '/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/VendorSet', undefined, undefined, jwtToken);
-        // Map S/4HANA fields to frontend expected fields
-        const rawVendors = ((_b = response.d) === null || _b === void 0 ? void 0 : _b.results) || response.d || response || [];
-        const mappedVendors = (Array.isArray(rawVendors) ? rawVendors : [rawVendors]).map((v) => ({
-            id: v.Vendorcode || v.vendor_code,
-            vendor_code: v.Vendorcode || v.vendor_code,
-            vendor_name: v.Vendorname || v.vendor_name,
-            total_emp: v.Totalemp || v.total_emp,
-            rate: v.Rate || v.rate,
-            contract_person: v.Contractperson || v.contract_person,
-            contact_email: v.Contactemail || v.contact_email,
-            contact_phone: v.Contactphone || v.contact_phone,
-            contact_address: v.Contactaddress || v.contact_address,
-            status: v.Status || v.status || 'ACTIVE'
-        }));
+        // Fetch both vendors and users in parallel to optimize response time
+        const [vendorsRes, usersRes] = yield Promise.all([
+            (0, s4hana_1.s4hanaRequest)('GET', '/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/VendorSet', undefined, undefined, jwtToken),
+            (0, s4hana_1.s4hanaRequest)('GET', '/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/UsersSet', undefined, undefined, jwtToken).catch(err => {
+                console.warn('Could not fetch users to calculate dynamic employee counts:', err.message);
+                return { d: { results: [] } };
+            })
+        ]);
+        const rawUsers = ((_b = usersRes.d) === null || _b === void 0 ? void 0 : _b.results) || usersRes.d || [];
+        const empCounts = {};
+        (Array.isArray(rawUsers) ? rawUsers : [rawUsers]).forEach((u) => {
+            const vCode = (u.Vendorcode || u.vendor_code || '').toUpperCase().trim();
+            if (vCode) {
+                empCounts[vCode] = (empCounts[vCode] || 0) + 1;
+            }
+        });
+        const rawVendors = ((_c = vendorsRes.d) === null || _c === void 0 ? void 0 : _c.results) || vendorsRes.d || vendorsRes || [];
+        const mappedVendors = (Array.isArray(rawVendors) ? rawVendors : [rawVendors]).map((v) => {
+            const vCode = (v.Vendorcode || v.vendor_code || '').toUpperCase().trim();
+            return {
+                id: v.Vendorcode || v.vendor_code,
+                vendor_code: v.Vendorcode || v.vendor_code,
+                vendor_name: v.Vendorname || v.vendor_name,
+                total_emp: empCounts[vCode] || 0,
+                rate: v.Rate || v.rate,
+                contract_person: v.Contractperson || v.contract_person,
+                contact_email: v.Contactemail || v.contact_email,
+                contact_phone: v.Contactphone || v.contact_phone,
+                contact_address: v.Contactaddress || v.contact_address,
+                status: v.Status || v.status || 'ACTIVE'
+            };
+        });
         res.json({ message: 'Success', vendors: mappedVendors });
     }
     catch (error) {
@@ -66,3 +82,68 @@ const createVendor = (req, res) => __awaiter(void 0, void 0, void 0, function* (
     }
 });
 exports.createVendor = createVendor;
+const updateVendorStatus = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
+    try {
+        const { vendor_code } = req.params;
+        const { status } = req.body;
+        const jwtToken = (_a = req.headers.authorization) === null || _a === void 0 ? void 0 : _a.split(' ')[1];
+        if (!vendor_code || !status) {
+            return res.status(400).json({ message: 'Vendor code and status are required' });
+        }
+        // Fetch existing vendor to preserve fields
+        let existingVendor = {};
+        try {
+            const vRes = yield (0, s4hana_1.s4hanaRequest)('GET', `/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/VendorSet?$filter=Vendorcode eq '${vendor_code.toUpperCase()}'`, undefined, undefined, jwtToken);
+            const vendorsList = ((_b = vRes.d) === null || _b === void 0 ? void 0 : _b.results) || vRes.d || [];
+            const found = Array.isArray(vendorsList) ? vendorsList.find((v) => { var _a; return ((_a = v.Vendorcode) === null || _a === void 0 ? void 0 : _a.toUpperCase()) === vendor_code.toUpperCase(); }) : vendorsList;
+            if (found) {
+                existingVendor = found;
+            }
+        }
+        catch (err) {
+            console.warn('Could not fetch existing vendor details for update status:', err.message);
+        }
+        const s4hanaData = {
+            Vendorcode: vendor_code.toUpperCase(),
+            Vendorname: existingVendor.Vendorname || existingVendor.vendor_name || vendor_code.toUpperCase(),
+            Totalemp: existingVendor.Totalemp || "0",
+            Rate: existingVendor.Rate || "0.00",
+            Contractperson: existingVendor.Contractperson || "",
+            Contactemail: existingVendor.Contactemail || "",
+            Contactphone: existingVendor.Contactphone || "",
+            Contactaddress: existingVendor.Contactaddress || "",
+            Status: status.toUpperCase()
+        };
+        let updateRes;
+        let updateMethod = 'PUT';
+        // Fallback try chain: PUT -> PATCH -> POST
+        try {
+            updateRes = yield (0, s4hana_1.s4hanaRequest)('PUT', `/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/VendorSet('${vendor_code.toUpperCase()}')`, s4hanaData, undefined, jwtToken);
+            updateMethod = 'PUT';
+        }
+        catch (putErr) {
+            console.warn(`PUT vendor status failed, trying PATCH:`, putErr.message);
+            try {
+                updateRes = yield (0, s4hana_1.s4hanaRequest)('PATCH', `/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/VendorSet('${vendor_code.toUpperCase()}')`, s4hanaData, undefined, jwtToken);
+                updateMethod = 'PATCH';
+            }
+            catch (patchErr) {
+                console.warn(`PATCH vendor status failed, falling back to POST:`, patchErr.message);
+                try {
+                    updateRes = yield (0, s4hana_1.s4hanaRequest)('POST', '/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/VendorSet', s4hanaData, undefined, jwtToken);
+                    updateMethod = 'POST';
+                }
+                catch (postErr) {
+                    throw new Error(`Failed to update vendor status in S/4HANA via all methods: ${postErr.message}`);
+                }
+            }
+        }
+        res.json({ message: `Vendor status updated successfully using ${updateMethod}`, data: updateRes });
+    }
+    catch (error) {
+        console.error('updateVendorStatus Error:', error);
+        res.status(500).json({ message: 'Error updating vendor status in S/4HANA', error: error.message });
+    }
+});
+exports.updateVendorStatus = updateVendorStatus;

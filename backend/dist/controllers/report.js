@@ -27,6 +27,18 @@ const getProp = (obj, target) => {
     return key ? obj[key] : undefined;
 };
 exports.getProp = getProp;
+const getEmailFilter = (email) => {
+    const cleanEmail = (email || '').trim();
+    const lower = cleanEmail.toLowerCase();
+    const upper = cleanEmail.toUpperCase();
+    const parts = cleanEmail.split('@');
+    let capitalized = cleanEmail;
+    if (parts.length === 2) {
+        capitalized = parts[0].charAt(0).toUpperCase() + parts[0].slice(1).toLowerCase() + '@' + parts[1].toLowerCase();
+    }
+    const casings = Array.from(new Set([cleanEmail, lower, upper, capitalized]));
+    return '(' + casings.map(c => `Email eq '${c}'`).join(' or ') + ')';
+};
 const getMISReport = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
     try {
@@ -38,35 +50,26 @@ const getMISReport = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         const { startDate, endDate, emp_name, vendor_code, page = '1', limit = '50', fetchAll = 'false' } = req.query;
         const pageNum = parseInt(page, 10);
         const limitNum = parseInt(limit, 10);
-        // 2. Resolve User Filters (If searching by name or vendor code, we must fetch their emails first)
+        // 2. Resolve User Filters (Needed for searching by name, or for VENDOR_ADMIN / SUPER_ADMIN to map vendor employees)
         let preFilterEmails = null;
         let needsPreFilter = false;
         let usersQuery = `/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/UsersSet?$top=5000`;
         let userFilters = [];
-        if (userRole === 'EMPLOYEE') {
-            userFilters.push(`tolower(Email) eq '${userEmail.toLowerCase()}'`);
+        if (emp_name || userRole === 'VENDOR_ADMIN' || (userRole === 'SUPER_ADMIN' && vendor_code)) {
             needsPreFilter = true;
-        }
-        else if (userRole === 'VENDOR_ADMIN') {
-            if (userVendorCode) {
-                userFilters.push(`(Vendorcode eq '${userVendorCode.toUpperCase()}' or tolower(Email) eq '${userEmail.toLowerCase()}')`);
-            }
-            else {
-                userFilters.push(`tolower(Email) eq '${userEmail.toLowerCase()}'`);
-            }
-            if (emp_name)
-                userFilters.push(`substringof('${emp_name}', Name)`);
-            needsPreFilter = true;
-        }
-        else {
-            // SUPER_ADMIN
-            if (vendor_code) {
-                userFilters.push(`Vendorcode eq '${vendor_code.toUpperCase()}'`);
-                needsPreFilter = true;
-            }
             if (emp_name) {
                 userFilters.push(`substringof('${emp_name}', Name)`);
-                needsPreFilter = true;
+            }
+            if (userRole === 'VENDOR_ADMIN') {
+                if (userVendorCode) {
+                    userFilters.push(`Vendorcode eq '${userVendorCode.toUpperCase()}'`);
+                }
+                else {
+                    userFilters.push(`Email eq '${userEmail}'`);
+                }
+            }
+            else if (userRole === 'SUPER_ADMIN' && vendor_code) {
+                userFilters.push(`Vendorcode eq '${vendor_code.toUpperCase()}'`);
             }
         }
         if (needsPreFilter) {
@@ -78,52 +81,38 @@ const getMISReport = (req, res) => __awaiter(void 0, void 0, void 0, function* (
                 usersRes = yield (0, s4hana_1.s4hanaRequest)('GET', usersQuery, undefined, undefined, jwtToken);
             }
             catch (e) {
-                // Fallback if tolower is not supported by SAP Gateway
-                if (e.message && e.message.includes('tolower')) {
-                    usersQuery = usersQuery.replace(/tolower\(Email\) eq '[^']+'/g, `Email eq '${userEmail}'`);
-                    usersRes = yield (0, s4hana_1.s4hanaRequest)('GET', usersQuery, undefined, undefined, jwtToken);
+                console.warn(`[getMISReport] Filtered users query failed (${usersQuery}):`, e.message, '. Retrying without filter...');
+                try {
+                    usersRes = yield (0, s4hana_1.s4hanaRequest)('GET', '/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/UsersSet?$top=5000', undefined, undefined, jwtToken);
                 }
-                else {
-                    throw e;
+                catch (fallbackErr) {
+                    console.error('[getMISReport] Fallback users query failed:', fallbackErr.message);
+                    usersRes = { d: { results: [] } };
                 }
             }
             let users = ((_e = usersRes.d) === null || _e === void 0 ? void 0 : _e.results) || usersRes.d || [];
             if (!Array.isArray(users))
                 users = [users];
-            // Node.js Level Security: S/4HANA ABAP often ignores complex OData filters. 
-            // We MUST manually enforce Row-Level Security here to prevent data leaks.
-            if (userRole === 'EMPLOYEE') {
+            // Node.js Level Security fallback for emp_name search
+            if (emp_name) {
+                const searchName = emp_name.toLowerCase();
+                users = users.filter((u) => ((0, exports.getProp)(u, 'name') || '').toLowerCase().includes(searchName));
+            }
+            if (userRole === 'VENDOR_ADMIN' && userVendorCode) {
+                users = users.filter((u) => ((0, exports.getProp)(u, 'vendorcode') || '').toUpperCase() === userVendorCode.toUpperCase() || ((0, exports.getProp)(u, 'email') || '').toLowerCase() === userEmail.toLowerCase());
+            }
+            else if (userRole === 'SUPER_ADMIN' && vendor_code) {
+                users = users.filter((u) => ((0, exports.getProp)(u, 'vendorcode') || '').toUpperCase() === vendor_code.toUpperCase());
+            }
+            else if (userRole === 'EMPLOYEE') {
                 users = users.filter((u) => ((0, exports.getProp)(u, 'email') || '').toLowerCase() === userEmail.toLowerCase());
             }
-            else if (userRole === 'VENDOR_ADMIN') {
-                users = users.filter((u) => {
-                    const uEmail = ((0, exports.getProp)(u, 'email') || '').toLowerCase();
-                    const uVendor = ((0, exports.getProp)(u, 'vendorcode') || '').toUpperCase();
-                    if (userVendorCode && uVendor === userVendorCode.toUpperCase())
-                        return true;
-                    if (uEmail === userEmail.toLowerCase())
-                        return true;
-                    return false;
-                });
-                if (emp_name) {
-                    const searchName = emp_name.toLowerCase();
-                    users = users.filter((u) => ((0, exports.getProp)(u, 'name') || '').toLowerCase().includes(searchName));
-                }
-            }
-            else {
-                // SUPER_ADMIN
-                if (vendor_code) {
-                    users = users.filter((u) => ((0, exports.getProp)(u, 'vendorcode') || '').toUpperCase() === vendor_code.toUpperCase());
-                }
-                if (emp_name) {
-                    const searchName = emp_name.toLowerCase();
-                    users = users.filter((u) => ((0, exports.getProp)(u, 'name') || '').toLowerCase().includes(searchName));
-                }
-            }
-            // Preserve exact case from SAP
             preFilterEmails = users.map((u) => (0, exports.getProp)(u, 'email')).filter(Boolean);
-            // If a search was performed and NO users matched, return empty instantly.
-            if (preFilterEmails.length === 0) {
+            if (userRole === 'VENDOR_ADMIN') {
+                preFilterEmails.push(userEmail);
+            }
+            preFilterEmails = Array.from(new Set(preFilterEmails));
+            if (preFilterEmails && preFilterEmails.length === 0) {
                 return res.json({ message: 'Success', data: [], totalCount: 0, page: pageNum, limit: limitNum });
             }
         }
@@ -141,9 +130,24 @@ const getMISReport = (req, res) => __awaiter(void 0, void 0, void 0, function* (
                 attFilters.push(`(${emailConditions})`);
             }
             else {
-                // If > 80 emails, the URL will be too long for S/4HANA Gateway.
-                // We must fetch the entire date range and filter in Node.js instead.
                 useODataPagination = false;
+            }
+        }
+        else if (!preFilterEmails) {
+            // Native Filtering via new Vendorcode and getEmailFilter!
+            if (userRole === 'EMPLOYEE') {
+                attFilters.push(getEmailFilter(userEmail));
+            }
+            else if (userRole === 'VENDOR_ADMIN') {
+                if (userVendorCode) {
+                    attFilters.push(`(Vendorcode eq '${userVendorCode.toUpperCase()}' or ${getEmailFilter(userEmail)})`);
+                }
+                else {
+                    attFilters.push(getEmailFilter(userEmail));
+                }
+            }
+            else if (userRole === 'SUPER_ADMIN' && vendor_code) {
+                attFilters.push(`Vendorcode eq '${vendor_code.toUpperCase()}'`);
             }
         }
         let attQuery = `/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/AttendanceSet`;
@@ -268,10 +272,10 @@ const getMISReport = (req, res) => __awaiter(void 0, void 0, void 0, function* (
                     id: a.Eventid || a.id || a.event_id,
                     work_date: aDate,
                     email: aEmail,
-                    status: a.Status === 'PENDING' ? 'working' : 'completed',
-                    overall_approval_status: a.Status,
+                    status: a.Type === 'OUT' ? 'completed' : 'working',
+                    overall_approval_status: 'PENDING',
                     is_exception: a.Isexception === 'X',
-                    hours_worked: a.Hoursworked || '0',
+                    hours_worked: (0, exports.getProp)(a, 'hoursworked') || '0',
                     ip_address: a.Ipaddress || a.ip_address,
                     os_system: a.Ossystem || a.os_system,
                     readable_location: a.Readablelocation || a.readable_location,
@@ -283,10 +287,18 @@ const getMISReport = (req, res) => __awaiter(void 0, void 0, void 0, function* (
             }
             if (a.Type === 'IN')
                 attMap[key].IN = a;
-            if (a.Type === 'OUT')
+            if (a.Type === 'OUT') {
                 attMap[key].OUT = a;
-            if (a.Status && a.Status !== 'PENDING') {
-                attMap[key].overall_approval_status = a.Status;
+                const hrs = (0, exports.getProp)(a, 'hoursworked');
+                if (hrs) {
+                    attMap[key].hours_worked = hrs;
+                }
+            }
+            // Update overall approval status if the event has APPROVED or REJECTED.
+            // If the event status is 'working', 'completed', or 'PENDING', keep it as PENDING.
+            const currentStatus = (a.Status || '').toUpperCase();
+            if (currentStatus === 'APPROVED' || currentStatus === 'REJECTED') {
+                attMap[key].overall_approval_status = currentStatus;
             }
         });
         let groupedData = Object.values(attMap);
@@ -298,7 +310,27 @@ const getMISReport = (req, res) => __awaiter(void 0, void 0, void 0, function* (
                 wsFilters.push(`Workdate ge datetime'${startDate}T00:00:00'`);
             if (endDate)
                 wsFilters.push(`Workdate le datetime'${endDate}T23:59:59'`);
-            // We could add email conditions here but for simplicity we rely on dates for worksheets
+            // Native Filtering via new Vendorcode and getEmailFilter!
+            if (!preFilterEmails) {
+                if (userRole === 'EMPLOYEE') {
+                    wsFilters.push(getEmailFilter(userEmail));
+                }
+                else if (userRole === 'VENDOR_ADMIN') {
+                    if (userVendorCode) {
+                        wsFilters.push(`(Vendorcode eq '${userVendorCode.toUpperCase()}' or ${getEmailFilter(userEmail)})`);
+                    }
+                    else {
+                        wsFilters.push(getEmailFilter(userEmail));
+                    }
+                }
+                else if (userRole === 'SUPER_ADMIN' && vendor_code) {
+                    wsFilters.push(`Vendorcode eq '${vendor_code.toUpperCase()}'`);
+                }
+            }
+            else if (preFilterEmails.length <= 80) {
+                const emailConditions = preFilterEmails.map(email => `Email eq '${email}'`).join(' or ');
+                wsFilters.push(`(${emailConditions})`);
+            }
             let wsQuery = `/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/WorksheetsSet`;
             if (wsFilters.length > 0) {
                 wsQuery += `?$filter=${wsFilters.join(' and ')}`;
@@ -355,8 +387,18 @@ const getMISReport = (req, res) => __awaiter(void 0, void 0, void 0, function* (
                 clock_in_time = formatTimeForUI(rec.work_date, rec.IN.Worktime);
             if (rec.OUT)
                 clock_out_time = formatTimeForUI(rec.work_date, rec.OUT.Worktime);
+            // Refined attendance status based strictly on the presence of IN/OUT records
             if (rec.IN && rec.OUT) {
                 rec.status = 'completed';
+            }
+            else if (rec.IN) {
+                rec.status = 'working';
+            }
+            else if (rec.OUT) {
+                rec.status = 'completed';
+            }
+            else {
+                rec.status = 'working';
             }
             return Object.assign(Object.assign({}, rec), { user: Object.assign(Object.assign({}, uInfo), { vendor: vInfo }), worksheet: wsInfo ? { tasks_description: (0, exports.getProp)(wsInfo, 'taskdescription') || (0, exports.getProp)(wsInfo, 'tasks_description') || '' } : null, clock_in_time,
                 clock_out_time });

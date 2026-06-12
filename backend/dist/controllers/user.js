@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.createUser = exports.getUsers = void 0;
+exports.listDebugUsers = exports.debugUsers = exports.createUser = exports.getUsers = void 0;
 const s4hana_1 = require("../services/s4hana");
 const getUsers = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b, _c;
@@ -88,3 +88,95 @@ const createUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
     }
 });
 exports.createUser = createUser;
+const debugUsers = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    try {
+        const jwtToken = (_a = req.headers.authorization) === null || _a === void 0 ? void 0 : _a.split(' ')[1];
+        const targets = [
+            { email: 'totan@gfl.co.in', name: 'totan', role: 'VENDOR_ADMIN' },
+            { email: 'arnab@gfl.co.in', name: 'arnab', role: 'EMPLOYEE' },
+            { email: 'pwcnew@gfl.co.in', name: 'pwcnew', role: 'VENDOR_ADMIN' },
+            { email: 'pwc@gfl.co.in', name: 'pwc', role: 'EMPLOYEE' },
+            { email: 'pwc1@gfl.co.in', name: 'pwc1', role: 'EMPLOYEE' }
+        ];
+        const results = [];
+        for (const t of targets) {
+            const payload = {
+                Email: t.email,
+                Name: t.name,
+                Systemrole: t.role,
+                Vendorcode: 'V-1002',
+                Designation: 'CONSULTANT',
+                Track: 'S4HANA',
+                Workmodule: 'MM',
+                Billingalloc: 'FULL',
+                Vendormail: t.email,
+                Vendordomain: 'MM',
+                Vendorrole: 'ML',
+                Onboardingdate: '2026-06-08',
+                Offboardingdate: ''
+            };
+            let status = 'Failed';
+            let data = null;
+            // Try PUT first
+            try {
+                const putRes = yield (0, s4hana_1.s4hanaRequest)('PUT', `/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/UsersSet('${t.email}')`, payload, undefined, jwtToken);
+                status = 'Updated (PUT)';
+                data = putRes;
+            }
+            catch (putErr) {
+                console.warn(`PUT failed for user ${t.email}:`, putErr.message);
+                // Try PATCH
+                try {
+                    const patchRes = yield (0, s4hana_1.s4hanaRequest)('PATCH', `/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/UsersSet('${t.email}')`, payload, undefined, jwtToken);
+                    status = 'Updated (PATCH)';
+                    data = patchRes;
+                }
+                catch (patchErr) {
+                    console.warn(`PATCH failed for user ${t.email}:`, patchErr.message);
+                    // Try POST (recreate fallback)
+                    try {
+                        const createRes = yield (0, s4hana_1.s4hanaRequest)('POST', '/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/UsersSet', payload, undefined, jwtToken);
+                        status = 'Created (POST)';
+                        data = createRes;
+                    }
+                    catch (postErr) {
+                        console.error(`All write operations failed for user ${t.email}:`, postErr.message);
+                        status = `Failed: ${postErr.message}`;
+                    }
+                }
+            }
+            results.push({ email: t.email, status, data });
+        }
+        res.json({ message: 'Debug user mapping completed', results });
+    }
+    catch (error) {
+        console.error('debugUsers error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+exports.debugUsers = debugUsers;
+const listDebugUsers = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
+    try {
+        const jwtToken = (_a = req.headers.authorization) === null || _a === void 0 ? void 0 : _a.split(' ')[1];
+        const response = yield (0, s4hana_1.s4hanaRequest)('GET', '/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/UsersSet', undefined, undefined, jwtToken);
+        const rawUsers = ((_b = response.d) === null || _b === void 0 ? void 0 : _b.results) || response.d || response || [];
+        const mappedUsers = (Array.isArray(rawUsers) ? rawUsers : [rawUsers]).map((u) => ({
+            email: u.Email || u.email,
+            name: u.Name || u.name,
+            role: u.Systemrole || u.role,
+            vendor_code: u.Vendorcode || u.vendor_code,
+            designation: u.Designation || u.designation,
+            track: u.Track || u.track,
+            module: u.Workmodule || u.module,
+            billing_alloc: u.Billingalloc || u.billing_alloc
+        }));
+        res.json({ message: 'Success', users: mappedUsers });
+    }
+    catch (error) {
+        console.error('listDebugUsers error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+exports.listDebugUsers = listDebugUsers;

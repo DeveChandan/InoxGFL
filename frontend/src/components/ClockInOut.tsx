@@ -8,6 +8,8 @@ const ClockInOut = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [isClockingIn, setIsClockingIn] = useState(false);
+  const [isClockingOut, setIsClockingOut] = useState(false);
+  const [isSubmittingWorksheet, setIsSubmittingWorksheet] = useState(false);
   
   // Live Clock
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -126,10 +128,23 @@ const ClockInOut = () => {
     }
   };
 
-  const handleClockOutAttempt = async (loc?: string) => {
+  const handleClockOutAttempt = async (loc?: string, hours_worked?: string, worksheetSubmitted?: boolean) => {
     setError('');
+    setIsClockingOut(true);
     try {
-      const payload = typeof loc === 'string' ? { manual_location: loc } : {};
+      const payload: any = {};
+      if (typeof loc === 'string' && loc) payload.manual_location = loc;
+      
+      let finalHours = hours_worked;
+      if (!finalHours && attendance?.clock_in_time) {
+        const diffMs = new Date().getTime() - new Date(attendance.clock_in_time).getTime();
+        if (diffMs > 0) {
+          finalHours = (diffMs / (1000 * 60 * 60)).toFixed(2);
+        }
+      }
+      if (finalHours) payload.hours_worked = finalHours;
+      if (worksheetSubmitted) payload.worksheet_submitted = true;
+
       await api.post('/attendance/clock-out', payload);
       await fetchStatus();
     } catch (err: any) {
@@ -138,26 +153,41 @@ const ClockInOut = () => {
       } else {
         setError(err.response?.data?.message || 'Failed to clock out');
       }
+    } finally {
+      setIsClockingOut(false);
     }
   };
 
   const submitWorksheet = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    setIsClockingIn(true); // Re-use the loading state to show progress
+    setIsSubmittingWorksheet(true);
     try {
-      // hours_spent is now calculated automatically on the backend
-      await api.post('/worksheet/submit', { tasks_description: tasks });
-      setShowWorksheet(false);
+      const clockInTimeStr = attendance?.clock_in_time;
+      let hours_spent = "0";
+      if (clockInTimeStr) {
+        const diffMs = new Date().getTime() - new Date(clockInTimeStr).getTime();
+        if (diffMs > 0) {
+          hours_spent = (diffMs / (1000 * 60 * 60)).toFixed(2);
+        }
+      }
+
+      await api.post('/worksheet/submit', { tasks_description: tasks, hours_spent });
       
       // Delay clock-out slightly to ensure S/4HANA has fully committed the worksheet to the database
-      setTimeout(() => {
-        handleClockOutAttempt(manualLocation);
-        setIsClockingIn(false);
+      setTimeout(async () => {
+        try {
+          await handleClockOutAttempt(manualLocation, hours_spent, true);
+          setShowWorksheet(false);
+        } catch (err: any) {
+          setError(err.response?.data?.message || 'Failed to clock out');
+        } finally {
+          setIsSubmittingWorksheet(false);
+        }
       }, 2000);
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to submit worksheet');
-      setIsClockingIn(false);
+      setIsSubmittingWorksheet(false);
     }
   };
 
@@ -273,9 +303,18 @@ const ClockInOut = () => {
           </div>
           <button 
             onClick={() => handleClockOutAttempt()}
-            className="bg-white hover:bg-slate-50 text-slate-700 font-bold py-4 px-10 rounded-xl border border-slate-300 shadow-sm transition-all"
+            disabled={isClockingOut}
+            className={`bg-white hover:bg-slate-50 text-slate-700 font-bold py-4 px-10 rounded-xl border border-slate-300 shadow-sm transition-all flex items-center justify-center mx-auto ${isClockingOut ? 'opacity-80 cursor-wait' : 'transform hover:scale-105'}`}
           >
-            End Shift & Clock Out
+            {isClockingOut ? (
+              <>
+                <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-slate-700" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Clocking Out...
+              </>
+            ) : 'End Shift & Clock Out'}
           </button>
         </div>
       )}
@@ -330,30 +369,31 @@ const ClockInOut = () => {
                <p className="text-xs text-slate-400 mt-1">Your hours will be automatically calculated when you clock out.</p>
              </div>
              
-             <div className="flex space-x-4 pt-2">
-                <button 
-                  type="submit"
-                  disabled={isClockingIn}
-                  className={`flex-1 bg-primary hover:bg-primary-hover text-white font-bold py-3 px-4 rounded-xl shadow-md shadow-primary/20 transition-all flex justify-center items-center ${isClockingIn ? 'opacity-80 cursor-wait' : ''}`}
-                >
-                  {isClockingIn ? (
-                    <>
-                      <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                      </svg>
-                      Saving...
-                    </>
-                  ) : 'Submit & Clock Out'}
-                </button>
-                <button 
-                  type="button"
-                  onClick={() => setShowWorksheet(false)}
-                  className="flex-1 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-bold py-3 px-4 rounded-xl transition-all shadow-sm"
-                >
-                  Cancel
-                </button>
-             </div>
+              <div className="flex space-x-4 pt-2">
+                 <button 
+                   type="submit"
+                   disabled={isSubmittingWorksheet}
+                   className={`flex-1 bg-primary hover:bg-primary-hover text-white font-bold py-3 px-4 rounded-xl shadow-md shadow-primary/20 transition-all flex justify-center items-center ${isSubmittingWorksheet ? 'opacity-80 cursor-wait' : ''}`}
+                 >
+                   {isSubmittingWorksheet ? (
+                     <>
+                       <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                       </svg>
+                       Submitting & Clocking Out...
+                     </>
+                   ) : 'Submit & Clock Out'}
+                 </button>
+                 <button 
+                   type="button"
+                   onClick={() => setShowWorksheet(false)}
+                   disabled={isSubmittingWorksheet}
+                   className="flex-1 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-bold py-3 px-4 rounded-xl transition-all shadow-sm"
+                 >
+                   Cancel
+                 </button>
+              </div>
            </form>
         </div>
       )}

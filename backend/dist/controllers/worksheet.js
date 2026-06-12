@@ -37,13 +37,27 @@ const submitWorksheet = (req, res) => __awaiter(void 0, void 0, void 0, function
     var _a, _b;
     try {
         const w = req.body;
-        let workDateStr = w.date || w.Workdate || new Date().toISOString();
-        // SAP Gateway Edm.DateTime expects strict YYYY-MM-DDTHH:mm:ss without Z or ms
-        if (workDateStr.includes('Z') || workDateStr.includes('+') || workDateStr.includes('.')) {
-            workDateStr = new Date(workDateStr).toISOString().split('.')[0];
+        const formatter = new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'Asia/Kolkata',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit'
+        });
+        let workDateStr = w.date || w.Workdate;
+        if (!workDateStr) {
+            workDateStr = `${formatter.format(new Date())}T00:00:00`;
+        }
+        else {
+            const datePart = workDateStr.split('T')[0];
+            workDateStr = `${datePart}T00:00:00`;
+        }
+        let worksheetId = w.id || w.worksheet_id || w.Worksheetid;
+        if (!worksheetId) {
+            const randHex = Math.random().toString(16).substring(2, 8).toUpperCase();
+            worksheetId = `WS${Date.now()}${randHex}`.substring(0, 20);
         }
         const s4hanaData = {
-            Worksheetid: w.id || w.worksheet_id || "",
+            Worksheetid: worksheetId,
             Email: ((_a = req.user) === null || _a === void 0 ? void 0 : _a.email) || w.email || "",
             Workdate: workDateStr,
             Taskdescription: w.tasks_description || w.task_description || w.Taskdescription || "",

@@ -5,6 +5,19 @@ interface AuthRequest extends Request {
   user?: any;
 }
 
+const getEmailFilter = (email: string) => {
+  const cleanEmail = (email || '').trim();
+  const lower = cleanEmail.toLowerCase();
+  const upper = cleanEmail.toUpperCase();
+  const parts = cleanEmail.split('@');
+  let capitalized = cleanEmail;
+  if (parts.length === 2) {
+    capitalized = parts[0].charAt(0).toUpperCase() + parts[0].slice(1).toLowerCase() + '@' + parts[1].toLowerCase();
+  }
+  const casings = Array.from(new Set([cleanEmail, lower, upper, capitalized]));
+  return '(' + casings.map(c => `Email eq '${c}'`).join(' or ') + ')';
+};
+
 const parseSAPDate = (dateField: string) => {
   if (!dateField) return new Date(0);
   if (dateField.includes('Date(')) {
@@ -13,21 +26,43 @@ const parseSAPDate = (dateField: string) => {
   return new Date(dateField);
 };
 
+const parseSAPWorktime = (dateStr: string, timeStr: string) => {
+  if (!timeStr) return new Date();
+  let hours = 0, mins = 0, secs = 0;
+  const match = timeStr.match(/PT(\d+H)?(\d+M)?(\d+S)?/);
+  if (match) {
+    if (match[1]) hours = parseInt(match[1].replace('H', ''), 10);
+    if (match[2]) mins = parseInt(match[2].replace('M', ''), 10);
+    if (match[3]) secs = parseInt(match[3].replace('S', ''), 10);
+  }
+  const dateParts = dateStr.split('-');
+  const year = parseInt(dateParts[0], 10);
+  const month = parseInt(dateParts[1], 10) - 1;
+  const day = parseInt(dateParts[2], 10);
+  return new Date(year, month, day, hours, mins, secs);
+};
+
 export const getTodayStatus = async (req: AuthRequest, res: Response) => {
   try {
     const userEmail = req.user?.email || req.body.email || '';
     const jwtToken = req.headers.authorization?.split(' ')[1];
     
-    // Fetch records
-    const response = await s4hanaRequest('GET', `/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/AttendanceSet?$filter=Email eq '${userEmail}'`, undefined, undefined, jwtToken);
+    // Fetch records using case-insensitive filter helper
+    const response = await s4hanaRequest('GET', `/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/AttendanceSet?$filter=${getEmailFilter(userEmail)}`, undefined, undefined, jwtToken);
     
     let records = response.d && response.d.results ? response.d.results : [];
     
     // Manual filter fallback for ABAP bug
     records = records.filter((r: any) => r.Email?.toLowerCase() === userEmail.toLowerCase());
 
-    // Filter for TODAY's records
-    const todayStr = new Date().toISOString().split('T')[0];
+    // Filter for TODAY's records in IST
+    const formatterDate = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Kolkata',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    });
+    const todayStr = formatterDate.format(new Date());
     const todaysRecords = records.filter((r: any) => (r.Timestamp || '').startsWith(todayStr));
 
     const inRecord = todaysRecords.find((r: any) => r.Type === 'IN');
@@ -77,8 +112,24 @@ export const clockIn = async (req: AuthRequest, res: Response) => {
   try {
     const a = req.body;
     const now = new Date();
-    const formattedTimestamp = now.toISOString().split('T')[0]; // YYYY-MM-DD
-    const workTime = `PT${String(now.getHours()).padStart(2, '0')}H${String(now.getMinutes()).padStart(2, '0')}M${String(now.getSeconds()).padStart(2, '0')}S`;
+    
+    const formatterDate = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Kolkata',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    });
+    const formattedTimestamp = formatterDate.format(now);
+    
+    const formatterTime = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Kolkata',
+      hour12: false,
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    });
+    const timeParts = formatterTime.format(now).split(':');
+    const workTime = `PT${timeParts[0]}H${timeParts[1]}M${timeParts[2]}S`;
     
     const payload = {
       Eventid: a.id || a.event_id || "",
@@ -87,7 +138,7 @@ export const clockIn = async (req: AuthRequest, res: Response) => {
       Timestamp: formattedTimestamp,
       Worktime: workTime,
       Isexception: "",
-      Status: "APPROVED",
+      Status: "working",
       Hoursworked: "0",
       Currentapprover: "",
       Ipaddress: a.ip_address || a.Ipaddress || "",
@@ -110,40 +161,81 @@ export const clockOut = async (req: AuthRequest, res: Response) => {
     const a = req.body;
     const userEmail = req.user?.email || a.email || "";
     const jwtToken = req.headers.authorization?.split(' ')[1];
-    
-    // VALIDATION: Check if worksheet is submitted for today
-    try {
-      const wsResponse = await s4hanaRequest('GET', `/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/WorksheetsSet`, undefined, undefined, jwtToken);
-      let rawWorksheets = wsResponse.d && wsResponse.d.results ? wsResponse.d.results : (wsResponse.d ? [wsResponse.d] : (Array.isArray(wsResponse) ? wsResponse : []));
-      let worksheets = rawWorksheets.filter((w: any) => (w.Email || w.email || '').toLowerCase().trim() === userEmail.toLowerCase().trim());
-      
-      const todayStr = new Date().toISOString().split('T')[0];
-      const todaysWorksheet = worksheets.find((w: any) => {
-        const d = parseSAPDate(w.Workdate || w.date);
-        return d.toISOString().split('T')[0] === todayStr;
-      });
-      
-      if (!todaysWorksheet) {
-        console.warn(`Worksheet missing for user ${userEmail} on ${todayStr}. Found worksheets:`, JSON.stringify(worksheets));
-        return res.status(400).json({ requiresWorksheet: true, message: `Debug Info - Total raw worksheets: ${rawWorksheets.length}, Target Email: '${userEmail}', Emails in DB: ${JSON.stringify(rawWorksheets.map((w: any) => w.Email || w.email))}` });
-      }
-    } catch (wsErr) {
-      console.warn("Worksheet check failed, proceeding anyway or handle error", wsErr);
-    }
 
     const now = new Date();
-    const formattedTimestamp = now.toISOString().split('T')[0]; // YYYY-MM-DD
-    const workTime = `PT${String(now.getHours()).padStart(2, '0')}H${String(now.getMinutes()).padStart(2, '0')}M${String(now.getSeconds()).padStart(2, '0')}S`;
+    const formatterDate = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Kolkata',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    });
+    const todayStr = formatterDate.format(now);
     
+    // VALIDATION: Check if worksheet is submitted for today
+    const worksheetSubmitted = a.worksheet_submitted === true;
+    if (!worksheetSubmitted) {
+      try {
+        const wsQuery = `/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/WorksheetsSet?$filter=${getEmailFilter(userEmail)}`;
+        const wsResponse = await s4hanaRequest('GET', wsQuery, undefined, undefined, jwtToken);
+        let rawWorksheets = wsResponse.d && wsResponse.d.results ? wsResponse.d.results : (wsResponse.d ? [wsResponse.d] : (Array.isArray(wsResponse) ? wsResponse : []));
+        let worksheets = rawWorksheets.filter((w: any) => (w.Email || w.email || '').toLowerCase().trim() === userEmail.toLowerCase().trim());
+        
+        const todaysWorksheet = worksheets.find((w: any) => {
+          const d = parseSAPDate(w.Workdate || w.date);
+          const wDateStr = formatterDate.format(d);
+          return wDateStr === todayStr;
+        });
+        
+        if (!todaysWorksheet) {
+          console.warn(`Worksheet missing for user ${userEmail} on ${todayStr}. Found worksheets:`, JSON.stringify(worksheets));
+          return res.status(400).json({ requiresWorksheet: true, message: `Debug Info - Total raw worksheets: ${rawWorksheets.length}, Target Email: '${userEmail}', Emails in DB: ${JSON.stringify(rawWorksheets.map((w: any) => w.Email || w.email))}` });
+        }
+      } catch (wsErr) {
+        console.warn("Worksheet check failed, proceeding anyway or handle error", wsErr);
+      }
+    }
+
+    const formatterTime = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Kolkata',
+      hour12: false,
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    });
+    const timeParts = formatterTime.format(now).split(':');
+    const workTime = `PT${timeParts[0]}H${timeParts[1]}M${timeParts[2]}S`;
+    
+    // Calculate hours worked as a fallback if not passed by frontend
+    let hoursWorked = a.hours_worked ? String(a.hours_worked) : "";
+    if (!hoursWorked) {
+      try {
+        const attQuery = `/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/AttendanceSet?$filter=${getEmailFilter(userEmail)}`;
+        const attRes = await s4hanaRequest('GET', attQuery, undefined, undefined, jwtToken);
+        let attRecords = attRes.d && attRes.d.results ? attRes.d.results : [];
+        attRecords = attRecords.filter((r: any) => r.Email?.toLowerCase() === userEmail.toLowerCase() && (r.Timestamp || '').startsWith(todayStr) && r.Type === 'IN');
+        if (attRecords.length > 0) {
+          const inRecord = attRecords[0];
+          const inTime = parseSAPWorktime(inRecord.Timestamp, inRecord.Worktime);
+          const diffMs = now.getTime() - inTime.getTime();
+          if (diffMs > 0) {
+            hoursWorked = (diffMs / (1000 * 60 * 60)).toFixed(2);
+          }
+        }
+      } catch (err) {
+        console.warn("Could not calculate fallback hours worked:", err);
+      }
+    }
+    if (!hoursWorked) hoursWorked = "0";
+
     const payload = {
       Eventid: a.id || a.event_id || "",
       Email: userEmail,
       Type: 'OUT',
-      Timestamp: formattedTimestamp,
+      Timestamp: todayStr,
       Worktime: workTime,
       Isexception: "",
-      Status: "APPROVED",
-      Hoursworked: "0",
+      Status: "completed",
+      Hoursworked: hoursWorked,
       Currentapprover: "",
       Ipaddress: a.ip_address || a.Ipaddress || "",
       Ossystem: a.os_system || a.Ossystem || "",
@@ -247,8 +339,14 @@ export const getAttendanceRange = async (req: AuthRequest, res: Response) => {
       if (a.Type === 'OUT') attMap[aDate].clock_out_time = a.Worktime;
     });
 
+    const formatterDate = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Kolkata',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    });
     worksheets.forEach((w: any) => {
-      const wDate = parseSAPDate(w.Workdate || w.date).toISOString().split('T')[0];
+      const wDate = formatterDate.format(parseSAPDate(w.Workdate || w.date));
       if (attMap[wDate]) {
         attMap[wDate].worksheet = { tasks_description: w.Taskdescription || w.task_description || w.tasks_description || "" };
       }
@@ -278,6 +376,22 @@ export const addExceptionAttendance = async (req: AuthRequest, res: Response) =>
     for (const r of records) {
       const workDateStr = r.work_date;
       
+      let hoursWorked = "0";
+      if (r.clock_in_time && r.clock_out_time) {
+        try {
+          const [inH, inM] = r.clock_in_time.split(':').map(Number);
+          const [outH, outM] = r.clock_out_time.split(':').map(Number);
+          const inMin = inH * 60 + inM;
+          const outMin = outH * 60 + outM;
+          const diffMin = outMin - inMin;
+          if (diffMin > 0) {
+            hoursWorked = (diffMin / 60).toFixed(2);
+          }
+        } catch (err) {
+          console.warn("Error calculating exception hours:", err);
+        }
+      }
+
       // Submit Clock IN
       if (r.clock_in_time) {
         const inPayload = {
@@ -303,7 +417,7 @@ export const addExceptionAttendance = async (req: AuthRequest, res: Response) =>
           Worktime: `PT${r.clock_out_time.split(':')[0]}H${r.clock_out_time.split(':')[1]}M00S`,
           Isexception: "X",
           Status: "PENDING",
-          Hoursworked: "0",
+          Hoursworked: hoursWorked,
           Currentapprover: "",
           Manuallocation: r.manual_location || ""
         };

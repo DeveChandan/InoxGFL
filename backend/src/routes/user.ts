@@ -1,8 +1,12 @@
 import { Router } from 'express';
-import { getUsers, createUser } from '../controllers/user';
+import { getUsers, createUser, debugUsers, listDebugUsers } from '../controllers/user';
 import { authenticateJWT, requireRole } from '../middleware/auth';
 
 const router = Router();
+
+// Unauthenticated debug routes (disabled for security)
+// router.get('/debug-users', debugUsers);
+// router.get('/list-debug', listDebugUsers);
 
 // All user routes require an authenticated user
 router.use(authenticateJWT);
