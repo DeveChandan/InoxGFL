@@ -19,15 +19,24 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<User | null>(() => {
+    if (typeof window === 'undefined') {
+      return null;
+    }
 
-  useEffect(() => {
     const storedUser = localStorage.getItem('user');
     const storedToken = localStorage.getItem('token');
+
     if (storedUser && storedToken) {
-      setUser(JSON.parse(storedUser));
+      try {
+        return JSON.parse(storedUser);
+      } catch {
+        return null;
+      }
     }
-  }, []);
+
+    return null;
+  });
 
   const login = (userData: User, token: string) => {
     localStorage.setItem('user', JSON.stringify(userData));
