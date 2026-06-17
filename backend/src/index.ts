@@ -56,3 +56,22 @@ app.get('/api/health', (req, res) => {
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
+
+import { s4hanaRequest } from './services/s4hana';
+setTimeout(async () => {
+  try {
+    console.log('--- FETCHING ODATA METADATA FOR DEBUGGING ---');
+    const response = await s4hanaRequest('GET', '/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/$metadata', undefined, { 'Accept': 'application/xml' });
+    const xml = String(response);
+    const match = xml.match(/<EntityType Name="ApprovalMatrix">[\s\S]*?<\/EntityType>/i) 
+               || xml.match(/<EntityType Name="ApprovalMatrix"[\s\S]*?<\/EntityType>/i);
+    if (match) {
+      console.log('ApprovalMatrix Entity Metadata:\n', match[0]);
+    } else {
+      console.log('Could not find ApprovalMatrix Entity in metadata. First 1000 chars of metadata:\n', xml.substring(0, 1000));
+    }
+    console.log('--- END ODATA METADATA DEBUG ---');
+  } catch (err: any) {
+    console.error('Failed to fetch metadata on startup:', err.message);
+  }
+}, 5000);

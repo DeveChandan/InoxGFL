@@ -11,7 +11,8 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.s4hanaRequest = void 0;
 const http_client_1 = require("@sap-cloud-sdk/http-client");
-const DESTINATION_NAME = 'S4_DEV';
+//const DESTINATION_NAME = 'S4_DEV';
+const DESTINATION_NAME = 'com-pocmobile-app';
 /**
  * Wrapper for SAP Cloud SDK executeHttpRequest.
  * Automatically targets the s4hana-onpremise destination.

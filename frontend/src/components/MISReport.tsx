@@ -24,18 +24,20 @@ const MISReport = () => {
   // Search Filters
   const [empName, setEmpName] = useState('');
   const [vendorCode, setVendorCode] = useState('');
+  const [approvalStatus, setApprovalStatus] = useState('ALL');
   const [groupBy, setGroupBy] = useState<'none' | 'date' | 'user'>('none');
 
-  const fetchReport = async (currentPage = page) => {
+  const fetchReport = async (currentPage = page, customLimit = limit) => {
     setLoading(true);
     try {
       const queryParams = new URLSearchParams({
         startDate,
         endDate,
         page: currentPage.toString(),
-        limit: limit.toString(),
+        limit: customLimit.toString(),
         ...(empName && { emp_name: empName }),
-        ...(vendorCode && { vendor_code: vendorCode })
+        ...(vendorCode && { vendor_code: vendorCode }),
+        ...(approvalStatus && approvalStatus !== 'ALL' && { approval_status: approvalStatus })
       });
       
       const res = await api.get(`/report?${queryParams.toString()}`);
@@ -84,7 +86,8 @@ const MISReport = () => {
         endDate,
         fetchAll: 'true',
         ...(empName && { emp_name: empName }),
-        ...(vendorCode && { vendor_code: vendorCode })
+        ...(vendorCode && { vendor_code: vendorCode }),
+        ...(approvalStatus && approvalStatus !== 'ALL' && { approval_status: approvalStatus })
       });
       const res = await api.get(`/report?${queryParams.toString()}`);
       const fullData = res.data.data || [];
@@ -100,7 +103,9 @@ const MISReport = () => {
         'Clock Out': formatTime(row.clock_out_time),
         'Total Hours': row.hours_worked || '-',
         'Status': row.status,
-        'Approval Status': row.overall_approval_status,
+        'Approval Status': row.overall_approval_status === 'PENDING' && row.approval_steps && row.approval_steps.length > 0
+          ? `PENDING (L${row.approval_steps[0].level} - ${row.approval_steps[0].approver?.name || row.approval_steps[0].approver?.email || ''})`
+          : row.overall_approval_status,
         'Exception': row.is_exception ? 'Yes' : 'No',
         'Location': row.manual_location || row.readable_location || row.hidden_location || '-',
         'IP Address': row.ip_address || '-',
@@ -140,7 +145,7 @@ const MISReport = () => {
           Report Filters
         </div>
         
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
           <div>
             <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase tracking-wider">Month</label>
             <input 
@@ -169,6 +174,20 @@ const MISReport = () => {
             />
           </div>
           
+          <div>
+            <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase tracking-wider">Approval Status</label>
+            <select 
+              value={approvalStatus}
+              onChange={(e) => setApprovalStatus(e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 text-slate-900 rounded-lg p-2.5 focus:ring-2 focus:ring-primary outline-none shadow-sm cursor-pointer hover:bg-slate-100 transition-colors"
+            >
+              <option value="ALL">All Statuses</option>
+              <option value="PENDING">Pending</option>
+              <option value="APPROVED">Approved</option>
+              <option value="REJECTED">Rejected</option>
+            </select>
+          </div>
+
           {(user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN' || user?.role === 'VENDOR_ADMIN') && (
             <div>
               <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase tracking-wider">Employee Name</label>
@@ -216,8 +235,9 @@ const MISReport = () => {
               <select 
                 value={limit} 
                 onChange={(e) => {
-                  setLimit(Number(e.target.value));
-                  fetchReport(1);
+                  const newLimit = Number(e.target.value);
+                  setLimit(newLimit);
+                  fetchReport(1, newLimit);
                 }}
                 className="bg-slate-50 border border-slate-200 text-slate-700 text-sm rounded-lg p-2 focus:ring-2 focus:ring-primary outline-none shadow-sm cursor-pointer hover:bg-slate-100 transition-colors"
               >
@@ -225,6 +245,7 @@ const MISReport = () => {
                 <option value={50}>50</option>
                 <option value={100}>100</option>
                 <option value={500}>500</option>
+                <option value={100000}>All</option>
               </select>
             </div>
           </div>

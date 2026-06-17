@@ -41,7 +41,7 @@ export const getMISReport = async (req: AuthRequest, res: Response) => {
     const userVendorCode = req.user?.vendor_code || '';
     
     // 1. Extract Query Params
-    const { startDate, endDate, emp_name, vendor_code, page = '1', limit = '50', fetchAll = 'false' } = req.query;
+    const { startDate, endDate, emp_name, vendor_code, approval_status, page = '1', limit = '50', fetchAll = 'false' } = req.query;
     const pageNum = parseInt(page as string, 10);
     const limitNum = parseInt(limit as string, 10);
 
@@ -114,23 +114,18 @@ export const getMISReport = async (req: AuthRequest, res: Response) => {
       }
     }
 
-    // 3. Construct Attendance OData Query with $top, $skip, and $inlinecount
+    // 3. Construct Attendance OData Query (Fetch all matching records in date range, grouping/slicing done in Node.js)
     let attFilters: string[] = [];
     if (startDate) attFilters.push(`Timestamp ge '${startDate}'`);
     if (endDate) attFilters.push(`Timestamp le '${endDate}'`);
-    
-    let useODataPagination = true;
 
     // Inject pre-filtered emails if applicable
     if (preFilterEmails && preFilterEmails.length > 0) {
       if (preFilterEmails.length <= 80) {
         const emailConditions = preFilterEmails.map(email => `Email eq '${email}'`).join(' or ');
         attFilters.push(`(${emailConditions})`);
-      } else {
-        useODataPagination = false;
       }
     } else if (!preFilterEmails) {
-      // Native Filtering via new Vendorcode and getEmailFilter!
       if (userRole === 'EMPLOYEE') {
         attFilters.push(getEmailFilter(userEmail));
       } else if (userRole === 'VENDOR_ADMIN') {
@@ -145,34 +140,16 @@ export const getMISReport = async (req: AuthRequest, res: Response) => {
     }
 
     let attQuery = `/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/AttendanceSet`;
-    
-    if (useODataPagination) {
-      attQuery += `?$inlinecount=allpages`;
-      if (attFilters.length > 0) {
-        attQuery += `&$filter=${attFilters.join(' and ')}`;
-      }
-      if (fetchAll === 'true') {
-        attQuery += `&$top=10000`;
-      } else {
-        const skip = (pageNum - 1) * limitNum;
-        attQuery += `&$top=${limitNum}&$skip=${skip}`;
-      }
-    } else {
-      // Fallback: Fetch a larger set and don't skip
-      if (attFilters.length > 0) {
-        attQuery += `?$filter=${attFilters.join(' and ')}`;
-      }
-      attQuery += `${attFilters.length > 0 ? '&' : '?'}top=50000`;
+    if (attFilters.length > 0) {
+      attQuery += `?$filter=${attFilters.join(' and ')}`;
     }
-
-    // Sort by descending to keep most recent records first
+    attQuery += `${attFilters.length > 0 ? '&' : '?'}$top=20000`; // Fetch larger subset
     attQuery += `&$orderby=Timestamp desc`;
 
     let attRes;
     try {
       attRes = await s4hanaRequest('GET', attQuery, undefined, undefined, jwtToken);
     } catch (e: any) {
-      // If $orderby fails, fallback without it
       if (e.message && e.message.includes('orderby')) {
         attQuery = attQuery.replace(`&$orderby=Timestamp desc`, '');
         attRes = await s4hanaRequest('GET', attQuery, undefined, undefined, jwtToken);
@@ -183,10 +160,6 @@ export const getMISReport = async (req: AuthRequest, res: Response) => {
 
     let attendance = attRes.d?.results || attRes.d || [];
     if (!Array.isArray(attendance)) attendance = [attendance];
-    
-    // Extract total count from S/4HANA
-    const totalCountStr = attRes.d?.__count || 0;
-    let totalCount = parseInt(totalCountStr, 10);
 
     if (attendance.length === 0) {
       return res.json({ message: 'Success', data: [], totalCount: 0, page: pageNum, limit: limitNum });
@@ -201,68 +174,7 @@ export const getMISReport = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    // 4. JIT Fetching: Only fetch Users and Vendors that exist in this exact subset!
-    const uniqueEmails = Array.from(new Set(attendance.map((a: any) => (a.Email || a.email || '').toLowerCase()).filter(Boolean)));
-    const userMap: Record<string, any> = {};
-    const vendorMap: Record<string, any> = {};
-
-    if (uniqueEmails.length > 0) {
-      // Chunk emails to prevent URL too long errors
-      const emailChunks = [];
-      for (let i = 0; i < uniqueEmails.length; i += 50) {
-        emailChunks.push(uniqueEmails.slice(i, i + 50));
-      }
-
-      for (const chunk of emailChunks) {
-        const emailFilters = chunk.map(e => `Email eq '${e}'`).join(' or ');
-        const usersQuery = `/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/UsersSet?$filter=${emailFilters}`;
-        
-        try {
-          const uRes = await s4hanaRequest('GET', usersQuery, undefined, undefined, jwtToken);
-          let uData = uRes.d?.results || uRes.d || [];
-          if (!Array.isArray(uData)) uData = [uData];
-          
-          const vendorCodesToFetch = new Set<string>();
-
-          uData.forEach((u: any) => {
-            const uEmail = getProp(u, 'email');
-            if (uEmail) {
-              const uVendorCode = getProp(u, 'vendorcode') || '';
-              if (uVendorCode) vendorCodesToFetch.add(uVendorCode);
-              
-              userMap[uEmail.toLowerCase()] = {
-                email: uEmail,
-                name: getProp(u, 'name') || uEmail,
-                vendor_code: uVendorCode
-              };
-            }
-          });
-
-          // JIT Fetch missing Vendors
-          const vCodes = Array.from(vendorCodesToFetch);
-          if (vCodes.length > 0) {
-            const vFilters = vCodes.map(v => `Vendorcode eq '${v}'`).join(' or ');
-            const vQuery = `/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/VendorSet?$filter=${vFilters}`;
-            const vRes = await s4hanaRequest('GET', vQuery, undefined, undefined, jwtToken);
-            let vData = vRes.d?.results || vRes.d || [];
-            if (!Array.isArray(vData)) vData = [vData];
-            
-            vData.forEach((v: any) => {
-              const vCode = v.Vendorcode || v.vendor_code;
-              vendorMap[vCode.toLowerCase()] = {
-                 vendor_code: vCode,
-                 vendor_name: v.Vendorname || v.vendor_name
-              };
-            });
-          }
-
-        } catch (err) {
-          console.warn("Failed to fetch specific users chunk", err);
-        }
-      }
-    }
-
-    // 5. Group Attendance (IN/OUT pairs)
+    // 4. Group Attendance (IN/OUT pairs)
     const attMap: Record<string, any> = {};
     attendance.forEach((a: any) => {
       const aEmail = a.Email || a.email;
@@ -270,6 +182,7 @@ export const getMISReport = async (req: AuthRequest, res: Response) => {
       if (!aEmail || !aDate) return;
       
       const key = `${aDate}_${aEmail.toLowerCase()}`;
+      const currApp = a.Currentapprover || getProp(a, 'currentapprover') || '';
       if (!attMap[key]) {
         attMap[key] = {
           id: a.Eventid || a.id || a.event_id,
@@ -284,6 +197,8 @@ export const getMISReport = async (req: AuthRequest, res: Response) => {
           readable_location: a.Readablelocation || a.readable_location,
           hidden_location: a.Hiddenloaction || a.Hiddenlocation || a.hidden_location,
           manual_location: a.Manuallocation || a.manual_location,
+          current_approver: currApp,
+          vendor_code: a.Vendorcode || getProp(a, 'vendorcode') || '',
           IN: null,
           OUT: null
         };
@@ -296,25 +211,134 @@ export const getMISReport = async (req: AuthRequest, res: Response) => {
           attMap[key].hours_worked = hrs;
         }
       }
+      if (currApp && !attMap[key].current_approver) {
+        attMap[key].current_approver = currApp;
+      }
       
-      // Update overall approval status if the event has APPROVED or REJECTED.
-      // If the event status is 'working', 'completed', or 'PENDING', keep it as PENDING.
+      // Update overall approval status if the event has APPROVED, REJECTED, or PENDING.
       const currentStatus = (a.Status || '').toUpperCase();
-      if (currentStatus === 'APPROVED' || currentStatus === 'REJECTED') {
+      if (currentStatus === 'APPROVED' || currentStatus === 'REJECTED' || currentStatus === 'PENDING') {
         attMap[key].overall_approval_status = currentStatus;
       }
     });
 
     let groupedData = Object.values(attMap);
 
-    // 6. Fetch Worksheets for the JIT subset
+    // 5. Filter by Approval Status
+    if (approval_status && approval_status !== 'ALL') {
+      const filterStatus = (approval_status as string).toUpperCase();
+      groupedData = groupedData.filter((rec: any) => rec.overall_approval_status === filterStatus);
+    }
+
+    // 6. Sort Chronologically (Descending: newest dates at the top)
+    const normalizeDate = (dStr: string) => {
+      if (!dStr) return 0;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dStr)) return new Date(dStr).getTime();
+      if (/^\d{8}$/.test(dStr)) {
+        const y = dStr.substring(0, 4);
+        const m = dStr.substring(4, 6);
+        const d = dStr.substring(6, 8);
+        return new Date(`${y}-${m}-${d}`).getTime();
+      }
+      return new Date(dStr).getTime() || 0;
+    };
+    groupedData.sort((a: any, b: any) => normalizeDate(b.work_date) - normalizeDate(a.work_date));
+
+    // 7. Slicing for Pagination
+    const totalCount = groupedData.length;
+    let paginatedData = groupedData;
+    if (fetchAll !== 'true') {
+      const startIndex = (pageNum - 1) * limitNum;
+      paginatedData = groupedData.slice(startIndex, startIndex + limitNum);
+    }
+
+    // 8. JIT Fetching: Fetch employee and approver names/vendor details ONLY for the active page
+    const uniqueEmails = Array.from(new Set([
+      ...paginatedData.map((a: any) => a.email.toLowerCase()),
+      ...paginatedData.map((a: any) => {
+        const appEmail = a.current_approver || '';
+        if (appEmail.includes(':')) {
+          return appEmail.split(':')[1].toLowerCase();
+        }
+        return appEmail.toLowerCase();
+      })
+    ].filter(Boolean)));
+    const userMap: Record<string, any> = {};
+    const vendorMap: Record<string, any> = {};
+    const vendorCodesToFetch = new Set<string>();
+
+    // Collect vendor codes from paginated data directly as a fallback
+    paginatedData.forEach((rec: any) => {
+      const vCode = (rec.vendor_code || '').toString().trim().toUpperCase();
+      if (vCode) {
+        vendorCodesToFetch.add(vCode);
+      }
+    });
+
+    if (uniqueEmails.length > 0) {
+      const emailChunks = [];
+      for (let i = 0; i < uniqueEmails.length; i += 20) {
+        emailChunks.push(uniqueEmails.slice(i, i + 20));
+      }
+
+      for (const chunk of emailChunks) {
+        const emailFilters = chunk.map(e => getEmailFilter(e)).join(' or ');
+        const usersQuery = `/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/UsersSet?$filter=${emailFilters}`;
+        
+        try {
+          const uRes = await s4hanaRequest('GET', usersQuery, undefined, undefined, jwtToken);
+          let uData = uRes.d?.results || uRes.d || [];
+          if (!Array.isArray(uData)) uData = [uData];
+          
+          uData.forEach((u: any) => {
+            const uEmail = getProp(u, 'email');
+            if (uEmail) {
+              const uVendorCode = (getProp(u, 'vendorcode') || '').toString().trim().toUpperCase();
+              if (uVendorCode) vendorCodesToFetch.add(uVendorCode);
+              
+              userMap[uEmail.toLowerCase()] = {
+                email: uEmail,
+                name: getProp(u, 'name') || uEmail,
+                vendor_code: uVendorCode
+              };
+            }
+          });
+        } catch (err) {
+          console.warn("Failed to fetch specific users chunk", err);
+        }
+      }
+    }
+
+    const vCodes = Array.from(vendorCodesToFetch);
+    if (vCodes.length > 0) {
+      const vFilters = vCodes.map(v => `Vendorcode eq '${v}'`).join(' or ');
+      const vQuery = `/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/VendorSet?$filter=${vFilters}`;
+      try {
+        const vRes = await s4hanaRequest('GET', vQuery, undefined, undefined, jwtToken);
+        let vData = vRes.d?.results || vRes.d || [];
+        if (!Array.isArray(vData)) vData = [vData];
+        
+        vData.forEach((v: any) => {
+          const vCode = (v.Vendorcode || v.vendor_code || '').toString().trim().toUpperCase();
+          if (vCode) {
+            vendorMap[vCode] = {
+               vendor_code: vCode,
+               vendor_name: v.Vendorname || v.vendor_name || vCode
+            };
+          }
+        });
+      } catch (err) {
+        console.warn("Failed to fetch vendors", err);
+      }
+    }
+
+    // 9. Fetch Worksheets for ONLY the active page
     const wsMap: Record<string, any> = {};
-    if (groupedData.length > 0) {
+    if (paginatedData.length > 0) {
       let wsFilters: string[] = [];
       if (startDate) wsFilters.push(`Workdate ge datetime'${startDate}T00:00:00'`);
       if (endDate) wsFilters.push(`Workdate le datetime'${endDate}T23:59:59'`);
       
-      // Native Filtering via new Vendorcode and getEmailFilter!
       if (!preFilterEmails) {
         if (userRole === 'EMPLOYEE') {
           wsFilters.push(getEmailFilter(userEmail));
@@ -354,7 +378,7 @@ export const getMISReport = async (req: AuthRequest, res: Response) => {
       }
     }
 
-    // Format Times
+    // 10. Format and construct the Final Mapped Data
     const formatTimeForUI = (dateStr: string, timeStr: string) => {
       if (!timeStr) return dateStr;
       let hours = "00", mins = "00", secs = "00";
@@ -367,18 +391,10 @@ export const getMISReport = async (req: AuthRequest, res: Response) => {
       return `${dateStr}T${hours}:${mins}:${secs}`;
     };
 
-    let paginatedData = groupedData;
-    if (!useODataPagination && fetchAll !== 'true') {
-      const startIndex = (pageNum - 1) * limitNum;
-      paginatedData = groupedData.slice(startIndex, startIndex + limitNum);
-    } else if (fetchAll === 'true') {
-      paginatedData = groupedData.slice(0, 10000); 
-    }
-
-    // Final Mapping for the Results
     const finalReportData = paginatedData.map((rec: any) => {
-      const uInfo = userMap[rec.email.toLowerCase()] || { email: rec.email, name: rec.email, vendor_code: '' };
-      const vInfo = uInfo.vendor_code ? vendorMap[uInfo.vendor_code.toLowerCase()] : null;
+      const uInfo = userMap[rec.email.toLowerCase()] || { email: rec.email, name: rec.email, vendor_code: rec.vendor_code || '' };
+      const lookupCode = (uInfo.vendor_code || '').toString().trim().toUpperCase();
+      const vInfo = lookupCode ? vendorMap[lookupCode] : null;
       
       const wsInfo = wsMap[`${rec.work_date}_${rec.email.toLowerCase()}`];
       
@@ -387,7 +403,6 @@ export const getMISReport = async (req: AuthRequest, res: Response) => {
       if (rec.IN) clock_in_time = formatTimeForUI(rec.work_date, rec.IN.Worktime);
       if (rec.OUT) clock_out_time = formatTimeForUI(rec.work_date, rec.OUT.Worktime);
       
-      // Refined attendance status based strictly on the presence of IN/OUT records
       if (rec.IN && rec.OUT) {
         rec.status = 'completed';
       } else if (rec.IN) {
@@ -398,6 +413,34 @@ export const getMISReport = async (req: AuthRequest, res: Response) => {
         rec.status = 'working';
       }
       
+      let approval_steps: any[] = [];
+      if (rec.overall_approval_status === 'PENDING' && rec.current_approver) {
+        const parts = rec.current_approver.split(':');
+        if (parts.length === 2 && parts[0].startsWith('L')) {
+          const levelStr = parts[0].substring(1);
+          const levelNum = parseInt(levelStr, 10);
+          const approverEmail = parts[1];
+          const approverUser = userMap[approverEmail.toLowerCase()] || { email: approverEmail, name: approverEmail };
+          approval_steps = [{
+            level: levelNum,
+            approver: {
+              email: approverEmail,
+              name: approverUser.name
+            }
+          }];
+        } else {
+          const approverEmail = rec.current_approver;
+          const approverUser = userMap[approverEmail.toLowerCase()] || { email: approverEmail, name: approverEmail };
+          approval_steps = [{
+            level: 1,
+            approver: {
+              email: approverEmail,
+              name: approverUser.name
+            }
+          }];
+        }
+      }
+
       return {
         ...rec,
         user: {
@@ -406,15 +449,10 @@ export const getMISReport = async (req: AuthRequest, res: Response) => {
         },
         worksheet: wsInfo ? { tasks_description: getProp(wsInfo, 'taskdescription') || getProp(wsInfo, 'tasks_description') || '' } : null,
         clock_in_time,
-        clock_out_time
+        clock_out_time,
+        approval_steps
       };
     });
-
-    if (!useODataPagination) {
-      totalCount = groupedData.length;
-    } else {
-      totalCount = totalCount || finalReportData.length;
-    }
 
     res.json({ 
       message: 'Success', 

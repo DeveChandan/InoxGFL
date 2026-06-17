@@ -35,8 +35,19 @@ const login = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         // req.user is populated by passport/xssec
         let user = req.user;
         // Prioritize the email submitted in the login form so we can test different users,
-        // otherwise fallback to the BTP XSUAA session user, or finally a default mock user.
-        const rawEmail = req.body.email || (user ? (user.email || user.id) : null) || 'vineet.kumar@gfl.co.in';
+        // otherwise fallback to the BTP XSUAA session user, or finally a default mock user in dev.
+        let rawEmail = req.body.email;
+        if (!rawEmail) {
+            if (user && (user.email || user.id)) {
+                rawEmail = user.email || user.id;
+            }
+            else if (process.env.NODE_ENV !== 'production') {
+                rawEmail = 'vineet.kumar@gfl.co.in';
+            }
+            else {
+                return res.status(401).json({ message: 'Unauthorized: No active SAP BTP session found' });
+            }
+        }
         const userEmail = rawEmail; // DO NOT lowercase this! S/4HANA OData query is case-sensitive!
         let assignedEmail = userEmail;
         // Default fallback values

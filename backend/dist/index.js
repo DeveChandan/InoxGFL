@@ -1,4 +1,13 @@
 "use strict";
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -55,3 +64,23 @@ app.get('/api/health', (req, res) => {
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
 });
+const s4hana_1 = require("./services/s4hana");
+setTimeout(() => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        console.log('--- FETCHING ODATA METADATA FOR DEBUGGING ---');
+        const response = yield (0, s4hana_1.s4hanaRequest)('GET', '/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/$metadata', undefined, { 'Accept': 'application/xml' });
+        const xml = String(response);
+        const match = xml.match(/<EntityType Name="ApprovalMatrix">[\s\S]*?<\/EntityType>/i)
+            || xml.match(/<EntityType Name="ApprovalMatrix"[\s\S]*?<\/EntityType>/i);
+        if (match) {
+            console.log('ApprovalMatrix Entity Metadata:\n', match[0]);
+        }
+        else {
+            console.log('Could not find ApprovalMatrix Entity in metadata. First 1000 chars of metadata:\n', xml.substring(0, 1000));
+        }
+        console.log('--- END ODATA METADATA DEBUG ---');
+    }
+    catch (err) {
+        console.error('Failed to fetch metadata on startup:', err.message);
+    }
+}), 5000);

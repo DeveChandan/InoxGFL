@@ -42,6 +42,21 @@ const parseSAPWorktime = (dateStr: string, timeStr: string) => {
   return new Date(year, month, day, hours, mins, secs);
 };
 
+const formatTimeForUI = (dateStr: string, timeStr: string) => {
+  // timeStr might be like "PT09H30M00S"
+  if (!timeStr) return dateStr;
+  
+  let hours = "00", mins = "00", secs = "00";
+  const match = timeStr.match(/PT(\d+H)?(\d+M)?(\d+S)?/);
+  if (match) {
+    if (match[1]) hours = match[1].replace('H', '').padStart(2, '0');
+    if (match[2]) mins = match[2].replace('M', '').padStart(2, '0');
+    if (match[3]) secs = match[3].replace('S', '').padStart(2, '0');
+  }
+  return `${dateStr}T${hours}:${mins}:${secs}`;
+};
+
+
 export const getTodayStatus = async (req: AuthRequest, res: Response) => {
   try {
     const userEmail = req.user?.email || req.body.email || '';
@@ -71,20 +86,6 @@ export const getTodayStatus = async (req: AuthRequest, res: Response) => {
     let currentStatus = 'not_started';
     let attendanceData = null;
     
-    const formatTimeForUI = (dateStr: string, timeStr: string) => {
-      // timeStr might be like "PT09H30M00S"
-      if (!timeStr) return dateStr;
-      
-      let hours = "00", mins = "00", secs = "00";
-      const match = timeStr.match(/PT(\d+H)?(\d+M)?(\d+S)?/);
-      if (match) {
-        if (match[1]) hours = match[1].replace('H', '').padStart(2, '0');
-        if (match[2]) mins = match[2].replace('M', '').padStart(2, '0');
-        if (match[3]) secs = match[3].replace('S', '').padStart(2, '0');
-      }
-      return `${dateStr}T${hours}:${mins}:${secs}`;
-    };
-
     if (inRecord && outRecord) {
       currentStatus = 'completed';
       attendanceData = {
@@ -335,8 +336,8 @@ export const getAttendanceRange = async (req: AuthRequest, res: Response) => {
       if (!attMap[aDate]) {
         attMap[aDate] = { work_date: aDate, manual_location: a.Manuallocation || a.manual_location || "" };
       }
-      if (a.Type === 'IN') attMap[aDate].clock_in_time = a.Worktime; // Keep raw for frontend to parse or format
-      if (a.Type === 'OUT') attMap[aDate].clock_out_time = a.Worktime;
+      if (a.Type === 'IN') attMap[aDate].clock_in_time = formatTimeForUI(aDate, a.Worktime);
+      if (a.Type === 'OUT') attMap[aDate].clock_out_time = formatTimeForUI(aDate, a.Worktime);
     });
 
     const formatterDate = new Intl.DateTimeFormat('en-CA', {
@@ -430,7 +431,13 @@ export const addExceptionAttendance = async (req: AuthRequest, res: Response) =>
         if (!wdStr.includes('T')) {
           wdStr = `${wdStr}T00:00:00`;
         }
+        
+        // Generate a unique Worksheetid required by SAP SEGW OData schema key constraint
+        const randHex = Math.random().toString(16).substring(2, 8).toUpperCase();
+        const worksheetId = `WS${Date.now()}${randHex}`.substring(0, 20);
+
         const wsPayload = {
+          Worksheetid: worksheetId,
           Email: target_user_id,
           Workdate: wdStr,
           Taskdescription: r.tasks_description,
@@ -439,8 +446,8 @@ export const addExceptionAttendance = async (req: AuthRequest, res: Response) =>
         };
         try {
           await s4hanaRequest('POST', '/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/WorksheetsSet', wsPayload, undefined, jwtToken);
-        } catch (wsErr) {
-           console.error("Worksheet POST failed for exception, might already exist or issue:", wsErr);
+        } catch (wsErr: any) {
+           console.error("Worksheet POST failed for exception, might already exist or issue:", wsErr.message);
         }
       }
     }

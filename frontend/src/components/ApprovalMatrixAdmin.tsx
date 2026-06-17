@@ -44,12 +44,12 @@ const ApprovalMatrixAdmin = () => {
     e.preventDefault();
     try {
       const payload = {
-        vendor_id: parseInt(vendorId),
+        vendor_id: vendorId,
         employee_role: role,
         track,
         module,
         level: parseInt(level),
-        approver_id: parseInt(approverId),
+        approver_id: approverId,
         approver_type: approverType
       };
 

@@ -52,3 +52,10 @@ resources:
     parameters:
       service: destination
       service-plan: lite
+
+  - name: inoxgfl-connectivity
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: connectivity
+      service-plan: lite
+

@@ -1,6 +1,7 @@
 import { executeHttpRequest, HttpResponse } from '@sap-cloud-sdk/http-client';
 
-const DESTINATION_NAME = 'S4_DEV';
+//const DESTINATION_NAME = 'S4_DEV';
+const DESTINATION_NAME = 'com-pocmobile-app';
 
 /**
  * Wrapper for SAP Cloud SDK executeHttpRequest.

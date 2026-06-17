@@ -1,6 +1,6 @@
-_schema-version: "3.1"
+_schema-version: "3.2"
 ID: inoxgfl-vendor-portal
-description: InoxGFL Vendor Portal App
+description: A Fiori-like Vendor Portal for SAP BTP
 version: 1.0.0
 modules:
 - name: inoxgfl-approuter
@@ -9,13 +9,12 @@ modules:
   requires:
   - name: inoxgfl-xsuaa
   - name: inoxgfl-destination
-  - name: inoxgfl-html5-repo-runtime
   - name: srv-api
     group: destinations
     properties:
       forwardAuthToken: true
       name: srv-api
-      url: ~{srv-url}
+      url: ~{url}
   parameters:
     disk-quota: 256M
     memory: 256M
@@ -25,20 +24,11 @@ modules:
   requires:
   - name: inoxgfl-xsuaa
   - name: inoxgfl-destination
+  - name: inoxgfl-connectivity
   provides:
   - name: srv-api
     properties:
-      srv-url: ${default-url}
-  parameters:
-    disk-quota: 512M
-    memory: 256M
-- name: inoxgfl-frontend-deployer
-  type: com.sap.application.content
-  path: inoxgfl-frontend-deployer
-  requires:
-  - name: inoxgfl-html5-repo-host
-    parameters:
-      content-target: true
+      url: ${default-url}
 resources:
 - name: inoxgfl-xsuaa
   type: org.cloudfoundry.managed-service
@@ -51,15 +41,10 @@ resources:
   parameters:
     service: destination
     service-plan: lite
-- name: inoxgfl-html5-repo-host
+- name: inoxgfl-connectivity
   type: org.cloudfoundry.managed-service
   parameters:
-    service: html5-apps-repo
-    service-plan: app-host
-- name: inoxgfl-html5-repo-runtime
-  type: org.cloudfoundry.managed-service
-  parameters:
-    service: html5-apps-repo
-    service-plan: app-runtime
+    service: connectivity
+    service-plan: lite
 parameters:
   enable-parallel-deployments: true
