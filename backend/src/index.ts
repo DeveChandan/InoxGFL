@@ -4,6 +4,11 @@ import dotenv from 'dotenv';
 import passport from 'passport';
 import { JWTStrategy } from '@sap/xssec';
 import xsenv from '@sap/xsenv';
+try {
+  xsenv.loadEnv();
+} catch (e: any) {
+  console.log('[xsenv] Using environment variables from system/BTP context:', e.message);
+}
 
 dotenv.config();
 
