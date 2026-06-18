@@ -18,6 +18,17 @@ const dotenv_1 = __importDefault(require("dotenv"));
 const passport_1 = __importDefault(require("passport"));
 const xssec_1 = require("@sap/xssec");
 const xsenv_1 = __importDefault(require("@sap/xsenv"));
+try {
+    console.log('[xsenv] Attempting to load default-env.json...');
+    xsenv_1.default.loadEnv();
+    console.log('[xsenv] VCAP_SERVICES loaded successfully:', !!process.env.VCAP_SERVICES);
+    if (process.env.VCAP_SERVICES) {
+        console.log('[xsenv] VCAP_SERVICES length:', process.env.VCAP_SERVICES.length);
+    }
+}
+catch (e) {
+    console.error('[xsenv] loadEnv failed with error:', e.message);
+}
 dotenv_1.default.config();
 const app = (0, express_1.default)();
 // SAP BTP Security Middleware

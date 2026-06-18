@@ -5,9 +5,14 @@ import passport from 'passport';
 import { JWTStrategy } from '@sap/xssec';
 import xsenv from '@sap/xsenv';
 try {
+  console.log('[xsenv] Attempting to load default-env.json...');
   xsenv.loadEnv();
+  console.log('[xsenv] VCAP_SERVICES loaded successfully:', !!process.env.VCAP_SERVICES);
+  if (process.env.VCAP_SERVICES) {
+    console.log('[xsenv] VCAP_SERVICES length:', process.env.VCAP_SERVICES.length);
+  }
 } catch (e: any) {
-  console.log('[xsenv] Using environment variables from system/BTP context:', e.message);
+  console.error('[xsenv] loadEnv failed with error:', e.message);
 }
 
 dotenv.config();
