@@ -30,6 +30,9 @@ modules:
     path: backend
     build-parameters:
       builder: zip
+    parameters:
+      disk-quota: 256M
+      memory: 256M
     provides:
       - name: srv-api
         properties:
