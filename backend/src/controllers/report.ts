@@ -95,7 +95,8 @@ export const getMISReport = async (req: AuthRequest, res: Response) => {
         users = users.filter((u: any) => (getProp(u, 'name') || '').toLowerCase().includes(searchName));
       }
       
-      if (userRole === 'VENDOR_ADMIN' && userVendorCode) {
+      const isGlobalAdmin = (userRole === 'SUPER_ADMIN' || (userRole === 'ADMIN' && !userVendorCode));
+      if (!isGlobalAdmin && userVendorCode) {
         users = users.filter((u: any) => (getProp(u, 'vendorcode') || '').toUpperCase() === userVendorCode.toUpperCase() || (getProp(u, 'email') || '').toLowerCase() === userEmail.toLowerCase());
       } else if (userRole === 'SUPER_ADMIN' && vendor_code) {
         users = users.filter((u: any) => (getProp(u, 'vendorcode') || '').toUpperCase() === (vendor_code as string).toUpperCase());
@@ -104,7 +105,7 @@ export const getMISReport = async (req: AuthRequest, res: Response) => {
       }
 
       preFilterEmails = users.map((u: any) => getProp(u, 'email')).filter(Boolean);
-      if (userRole === 'VENDOR_ADMIN') {
+      if (!isGlobalAdmin && userVendorCode) {
         preFilterEmails.push(userEmail);
       }
       preFilterEmails = Array.from(new Set(preFilterEmails));
@@ -126,14 +127,11 @@ export const getMISReport = async (req: AuthRequest, res: Response) => {
         attFilters.push(`(${emailConditions})`);
       }
     } else if (!preFilterEmails) {
+      const isGlobalAdmin = (userRole === 'SUPER_ADMIN' || (userRole === 'ADMIN' && !userVendorCode));
       if (userRole === 'EMPLOYEE') {
         attFilters.push(getEmailFilter(userEmail));
-      } else if (userRole === 'VENDOR_ADMIN') {
-        if (userVendorCode) {
-           attFilters.push(`(Vendorcode eq '${userVendorCode.toUpperCase()}' or ${getEmailFilter(userEmail)})`);
-        } else {
-           attFilters.push(getEmailFilter(userEmail));
-        }
+      } else if (!isGlobalAdmin && userVendorCode) {
+        attFilters.push(`(Vendorcode eq '${userVendorCode.toUpperCase()}' or ${getEmailFilter(userEmail)})`);
       } else if (userRole === 'SUPER_ADMIN' && vendor_code) {
         attFilters.push(`Vendorcode eq '${(vendor_code as string).toUpperCase()}'`);
       }
@@ -474,24 +472,30 @@ export const getOverviewStats = async (req: AuthRequest, res: Response) => {
     const userRole = req.user?.role || 'EMPLOYEE';
     const userVendorCode = req.user?.vendor_code || '';
 
-    // Calculate past dates
-    const today = new Date();
-    const pad = (n: number) => String(n).padStart(2, '0');
-    const todayStr = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+    // Calculate past dates in Asia/Kolkata timezone
+    const formatterDate = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Kolkata',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    });
+    const todayStr = formatterDate.format(new Date());
 
     const pastDate = new Date();
-    pastDate.setDate(today.getDate() - 7);
-    const startDateStr = `${pastDate.getFullYear()}-${pad(pastDate.getMonth() + 1)}-${pad(pastDate.getDate())}`;
+    pastDate.setDate(pastDate.getDate() - 7);
+    const startDateStr = formatterDate.format(pastDate);
 
     // Generate date array for 7-day trend
     const dateArray: string[] = [];
     for (let i = 6; i >= 0; i--) {
       const d = new Date();
-      d.setDate(today.getDate() - i);
-      dateArray.push(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`);
+      d.setDate(d.getDate() - i);
+      dateArray.push(formatterDate.format(d));
     }
 
-    if (userRole === 'SUPER_ADMIN' || userRole === 'ADMIN') {
+    const isGlobalAdmin = (userRole === 'SUPER_ADMIN' || (userRole === 'ADMIN' && !userVendorCode));
+
+    if (isGlobalAdmin) {
       // 1. Fetch Vendors
       let vendors: any[] = [];
       try {
@@ -550,8 +554,13 @@ export const getOverviewStats = async (req: AuthRequest, res: Response) => {
 
         // Filter active logs for today for this vendor
         const vTodayLogs = todayLogs.filter((a: any) => {
+          // Fallback: look up user by email to get their vendor code
+          const aEmail = (a.Email || a.email || '').toLowerCase();
+          const matchedUser = users.find((u: any) => (getProp(u, 'email') || '').toLowerCase() === aEmail);
+          const uVCode = matchedUser ? (getProp(matchedUser, 'vendorcode') || '').toString().trim().toUpperCase() : '';
+          
           const aVCode = (a.Vendorcode || getProp(a, 'vendorcode') || '').toString().trim().toUpperCase();
-          return aVCode === vCode;
+          return uVCode === vCode || aVCode === vCode;
         });
         const vActiveEmails = new Set(
           vTodayLogs.filter((a: any) => a.Type === 'IN').map((a: any) => (a.Email || a.email || '').toLowerCase())
@@ -592,7 +601,7 @@ export const getOverviewStats = async (req: AuthRequest, res: Response) => {
         dailyActivity
       });
 
-    } else if (userRole === 'VENDOR_ADMIN') {
+    } else if (userRole === 'VENDOR_ADMIN' || userVendorCode) {
       // 1. Fetch Users under this vendor
       let users: any[] = [];
       try {
@@ -609,12 +618,12 @@ export const getOverviewStats = async (req: AuthRequest, res: Response) => {
         console.warn('Failed to fetch vendor users for overview:', err);
       }
 
-      // 2. Fetch Attendance for last 7 days under this vendor
+      // 2. Fetch all Attendance for the last 7 days (filtered in Node.js to solve missing vendor_code field in logs)
       let attendance: any[] = [];
       try {
         const attRes = await s4hanaRequest(
           'GET', 
-          `/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/AttendanceSet?$filter=Vendorcode eq '${userVendorCode.toUpperCase()}' and Timestamp ge '${startDateStr}' and Timestamp le '${todayStr}'&$top=5000`, 
+          `/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/AttendanceSet?$filter=Timestamp ge '${startDateStr}' and Timestamp le '${todayStr}'&$top=10000`, 
           undefined, 
           undefined, 
           jwtToken
@@ -626,9 +635,17 @@ export const getOverviewStats = async (req: AuthRequest, res: Response) => {
       }
 
       const totalUsers = users.length;
+      const userEmails = new Set(users.map((u: any) => (getProp(u, 'email') || '').toLowerCase()).filter(Boolean));
+
+      // Filter attendance logs belonging to this vendor's users
+      const vendorAttendance = attendance.filter((a: any) => {
+        const aEmail = (a.Email || a.email || '').toLowerCase();
+        const aVCode = (a.Vendorcode || getProp(a, 'vendorcode') || '').toString().trim().toUpperCase();
+        return userEmails.has(aEmail) || aVCode === userVendorCode.toUpperCase();
+      });
 
       // Active users under vendor today
-      const todayLogs = attendance.filter((a: any) => (a.Timestamp || a.timestamp) === todayStr);
+      const todayLogs = vendorAttendance.filter((a: any) => (a.Timestamp || a.timestamp) === todayStr);
       const todayActiveEmails = new Set(
         todayLogs.filter((a: any) => a.Type === 'IN').map((a: any) => (a.Email || a.email || '').toLowerCase())
       );
@@ -637,7 +654,7 @@ export const getOverviewStats = async (req: AuthRequest, res: Response) => {
 
       // Trend data (last 7 days)
       const dailyActivity = dateArray.map(date => {
-        const dayLogs = attendance.filter((a: any) => (a.Timestamp || a.timestamp) === date);
+        const dayLogs = vendorAttendance.filter((a: any) => (a.Timestamp || a.timestamp) === date);
         const activeEmails = new Set(
           dayLogs.filter((a: any) => a.Type === 'IN').map((a: any) => (a.Email || a.email || '').toLowerCase())
         );
@@ -648,7 +665,7 @@ export const getOverviewStats = async (req: AuthRequest, res: Response) => {
       });
 
       return res.json({
-        role: userRole,
+        role: 'VENDOR_ADMIN',
         vendorCode: userVendorCode,
         stats: {
           totalUsers,
@@ -657,7 +674,6 @@ export const getOverviewStats = async (req: AuthRequest, res: Response) => {
         },
         dailyActivity
       });
-
     } else {
       // EMPLOYEE Overview
       let attendance: any[] = [];

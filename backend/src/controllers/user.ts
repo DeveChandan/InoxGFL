@@ -32,15 +32,20 @@ export const getUsers = async (req: AuthRequest, res: Response) => {
 
     // Find the caller's profile to enforce Role-Based Access Control
     const callerProfile = mappedUsers.find(u => u.email.toLowerCase() === userEmail.toLowerCase());
-    
+    const callerRole = req.user?.role || callerProfile?.role || 'EMPLOYEE';
+    const callerVendorCode = req.user?.vendor_code || callerProfile?.vendor_code || '';
+
+    const isGlobalAdmin = (userEmail.toLowerCase() === 'vineet.kumar@gfl.co.in' || callerRole === 'SUPER_ADMIN' || callerRole === 'SUPERADMIN' || (callerRole === 'ADMIN' && !callerVendorCode));
+    const isVendorRestricted = !isGlobalAdmin && callerVendorCode;
+
     if (!callerProfile && userEmail.toLowerCase() !== 'vineet.kumar@gfl.co.in') {
       // If user isn't in DB yet and not master key, return nothing to be safe
       mappedUsers = [];
-    } else if (userEmail.toLowerCase() === 'vineet.kumar@gfl.co.in' || callerProfile?.role === 'SUPERADMIN' || callerProfile?.role === 'SUPER_ADMIN') {
-      // SUPERADMIN sees everything
-    } else if (callerProfile?.role === 'VENDOR_ADMIN') {
-      // VENDOR_ADMIN only sees users from their exact same vendor
-      mappedUsers = mappedUsers.filter(u => (u.vendor_code || '') === (callerProfile.vendor_code || ''));
+    } else if (isGlobalAdmin) {
+      // SUPERADMIN/Global ADMIN sees everything
+    } else if (isVendorRestricted) {
+      // Vendor-restricted admin only sees users from their exact same vendor
+      mappedUsers = mappedUsers.filter(u => (u.vendor_code || '').toUpperCase() === callerVendorCode.toUpperCase());
     } else {
       // Regular EMPLOYEE only sees their own profile
       mappedUsers = mappedUsers.filter(u => u.email.toLowerCase() === userEmail.toLowerCase());

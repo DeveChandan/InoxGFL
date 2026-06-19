@@ -12,7 +12,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.listDebugUsers = exports.debugUsers = exports.createUser = exports.getUsers = void 0;
 const s4hana_1 = require("../services/s4hana");
 const getUsers = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c;
+    var _a, _b, _c, _d, _e;
     try {
         const jwtToken = (_a = req.headers.authorization) === null || _a === void 0 ? void 0 : _a.split(' ')[1];
         const userEmail = ((_b = req.user) === null || _b === void 0 ? void 0 : _b.email) || '';
@@ -36,16 +36,20 @@ const getUsers = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         }));
         // Find the caller's profile to enforce Role-Based Access Control
         const callerProfile = mappedUsers.find(u => u.email.toLowerCase() === userEmail.toLowerCase());
+        const callerRole = ((_d = req.user) === null || _d === void 0 ? void 0 : _d.role) || (callerProfile === null || callerProfile === void 0 ? void 0 : callerProfile.role) || 'EMPLOYEE';
+        const callerVendorCode = ((_e = req.user) === null || _e === void 0 ? void 0 : _e.vendor_code) || (callerProfile === null || callerProfile === void 0 ? void 0 : callerProfile.vendor_code) || '';
+        const isGlobalAdmin = (userEmail.toLowerCase() === 'vineet.kumar@gfl.co.in' || callerRole === 'SUPER_ADMIN' || callerRole === 'SUPERADMIN' || (callerRole === 'ADMIN' && !callerVendorCode));
+        const isVendorRestricted = !isGlobalAdmin && callerVendorCode;
         if (!callerProfile && userEmail.toLowerCase() !== 'vineet.kumar@gfl.co.in') {
             // If user isn't in DB yet and not master key, return nothing to be safe
             mappedUsers = [];
         }
-        else if (userEmail.toLowerCase() === 'vineet.kumar@gfl.co.in' || (callerProfile === null || callerProfile === void 0 ? void 0 : callerProfile.role) === 'SUPERADMIN' || (callerProfile === null || callerProfile === void 0 ? void 0 : callerProfile.role) === 'SUPER_ADMIN') {
-            // SUPERADMIN sees everything
+        else if (isGlobalAdmin) {
+            // SUPERADMIN/Global ADMIN sees everything
         }
-        else if ((callerProfile === null || callerProfile === void 0 ? void 0 : callerProfile.role) === 'VENDOR_ADMIN') {
-            // VENDOR_ADMIN only sees users from their exact same vendor
-            mappedUsers = mappedUsers.filter(u => (u.vendor_code || '') === (callerProfile.vendor_code || ''));
+        else if (isVendorRestricted) {
+            // Vendor-restricted admin only sees users from their exact same vendor
+            mappedUsers = mappedUsers.filter(u => (u.vendor_code || '').toUpperCase() === callerVendorCode.toUpperCase());
         }
         else {
             // Regular EMPLOYEE only sees their own profile
