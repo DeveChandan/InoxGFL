@@ -38,7 +38,7 @@ const getUsers = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         const callerProfile = mappedUsers.find(u => u.email.toLowerCase() === userEmail.toLowerCase());
         const callerRole = ((_d = req.user) === null || _d === void 0 ? void 0 : _d.role) || (callerProfile === null || callerProfile === void 0 ? void 0 : callerProfile.role) || 'EMPLOYEE';
         const callerVendorCode = ((_e = req.user) === null || _e === void 0 ? void 0 : _e.vendor_code) || (callerProfile === null || callerProfile === void 0 ? void 0 : callerProfile.vendor_code) || '';
-        const isGlobalAdmin = (userEmail.toLowerCase() === 'vineet.kumar@gfl.co.in' || callerRole === 'SUPER_ADMIN' || callerRole === 'SUPERADMIN' || (callerRole === 'ADMIN' && !callerVendorCode));
+        const isGlobalAdmin = (userEmail.toLowerCase() === 'vineet.kumar@gfl.co.in' || callerRole === 'SUPER_ADMIN' || callerRole === 'SUPERADMIN' || callerRole === 'ADMIN');
         const isVendorRestricted = !isGlobalAdmin && callerVendorCode;
         if (!callerProfile && userEmail.toLowerCase() !== 'vineet.kumar@gfl.co.in') {
             // If user isn't in DB yet and not master key, return nothing to be safe

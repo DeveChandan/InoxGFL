@@ -35,7 +35,7 @@ export const getUsers = async (req: AuthRequest, res: Response) => {
     const callerRole = req.user?.role || callerProfile?.role || 'EMPLOYEE';
     const callerVendorCode = req.user?.vendor_code || callerProfile?.vendor_code || '';
 
-    const isGlobalAdmin = (userEmail.toLowerCase() === 'vineet.kumar@gfl.co.in' || callerRole === 'SUPER_ADMIN' || callerRole === 'SUPERADMIN' || (callerRole === 'ADMIN' && !callerVendorCode));
+    const isGlobalAdmin = (userEmail.toLowerCase() === 'vineet.kumar@gfl.co.in' || callerRole === 'SUPER_ADMIN' || callerRole === 'SUPERADMIN' || callerRole === 'ADMIN');
     const isVendorRestricted = !isGlobalAdmin && callerVendorCode;
 
     if (!callerProfile && userEmail.toLowerCase() !== 'vineet.kumar@gfl.co.in') {

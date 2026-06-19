@@ -95,7 +95,7 @@ export const getMISReport = async (req: AuthRequest, res: Response) => {
         users = users.filter((u: any) => (getProp(u, 'name') || '').toLowerCase().includes(searchName));
       }
       
-      const isGlobalAdmin = (userRole === 'SUPER_ADMIN' || (userRole === 'ADMIN' && !userVendorCode));
+      const isGlobalAdmin = (userRole === 'SUPER_ADMIN' || userRole === 'ADMIN');
       if (!isGlobalAdmin && userVendorCode) {
         users = users.filter((u: any) => (getProp(u, 'vendorcode') || '').toUpperCase() === userVendorCode.toUpperCase() || (getProp(u, 'email') || '').toLowerCase() === userEmail.toLowerCase());
       } else if (userRole === 'SUPER_ADMIN' && vendor_code) {
@@ -127,7 +127,7 @@ export const getMISReport = async (req: AuthRequest, res: Response) => {
         attFilters.push(`(${emailConditions})`);
       }
     } else if (!preFilterEmails) {
-      const isGlobalAdmin = (userRole === 'SUPER_ADMIN' || (userRole === 'ADMIN' && !userVendorCode));
+      const isGlobalAdmin = (userRole === 'SUPER_ADMIN' || userRole === 'ADMIN');
       if (userRole === 'EMPLOYEE') {
         attFilters.push(getEmailFilter(userEmail));
       } else if (!isGlobalAdmin && userVendorCode) {
@@ -493,7 +493,7 @@ export const getOverviewStats = async (req: AuthRequest, res: Response) => {
       dateArray.push(formatterDate.format(d));
     }
 
-    const isGlobalAdmin = (userRole === 'SUPER_ADMIN' || (userRole === 'ADMIN' && !userVendorCode));
+    const isGlobalAdmin = (userRole === 'SUPER_ADMIN' || userRole === 'ADMIN');
 
     if (isGlobalAdmin) {
       // 1. Fetch Vendors
