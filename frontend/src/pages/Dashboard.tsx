@@ -9,6 +9,7 @@ import VendorManagement from '../components/VendorManagement';
 import UserManagement from '../components/UserManagement';
 import ApprovalDashboard from '../components/ApprovalDashboard';
 import ApprovalMatrixAdmin from '../components/ApprovalMatrixAdmin';
+import Overview from '../components/Overview';
 import { CheckSquare } from 'lucide-react';
 
 const Dashboard = () => {
@@ -113,13 +114,7 @@ const Dashboard = () => {
 
           {/* Dynamic Content Rendering */}
           <div className="animate-fade-in-up">
-            {activeTab === 'overview' && (
-               <div className="glass-panel p-6 rounded-2xl border border-slate-200 text-center text-slate-500 py-20 bg-white">
-                 <LayoutDashboard className="mx-auto h-12 w-12 text-slate-300 mb-4" />
-                 <h3 className="text-xl font-semibold text-slate-800 mb-2">Dashboard Overview</h3>
-                 <p>Navigate using the sidebar to view your specific modules.</p>
-               </div>
-            )}
+            {activeTab === 'overview' && <Overview />}
             
             {activeTab === 'vendors' && user?.role === 'SUPER_ADMIN' && <VendorManagement />}
             

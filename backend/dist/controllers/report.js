@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getMISReport = exports.getProp = void 0;
+exports.getOverviewStats = exports.getMISReport = exports.getProp = void 0;
 const s4hana_1 = require("../services/s4hana");
 const parseSAPDate = (dateField) => {
     var _a;
@@ -463,3 +463,234 @@ const getMISReport = (req, res) => __awaiter(void 0, void 0, void 0, function* (
     }
 });
 exports.getMISReport = getMISReport;
+const getOverviewStats = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
+    try {
+        const jwtToken = (_a = req.headers.authorization) === null || _a === void 0 ? void 0 : _a.split(' ')[1];
+        const userEmail = ((_b = req.user) === null || _b === void 0 ? void 0 : _b.email) || '';
+        const userRole = ((_c = req.user) === null || _c === void 0 ? void 0 : _c.role) || 'EMPLOYEE';
+        const userVendorCode = ((_d = req.user) === null || _d === void 0 ? void 0 : _d.vendor_code) || '';
+        // Calculate past dates
+        const today = new Date();
+        const pad = (n) => String(n).padStart(2, '0');
+        const todayStr = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+        const pastDate = new Date();
+        pastDate.setDate(today.getDate() - 7);
+        const startDateStr = `${pastDate.getFullYear()}-${pad(pastDate.getMonth() + 1)}-${pad(pastDate.getDate())}`;
+        // Generate date array for 7-day trend
+        const dateArray = [];
+        for (let i = 6; i >= 0; i--) {
+            const d = new Date();
+            d.setDate(today.getDate() - i);
+            dateArray.push(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`);
+        }
+        if (userRole === 'SUPER_ADMIN' || userRole === 'ADMIN') {
+            // 1. Fetch Vendors
+            let vendors = [];
+            try {
+                const vRes = yield (0, s4hana_1.s4hanaRequest)('GET', '/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/VendorSet?$top=1000', undefined, undefined, jwtToken);
+                vendors = ((_e = vRes.d) === null || _e === void 0 ? void 0 : _e.results) || vRes.d || [];
+                if (!Array.isArray(vendors))
+                    vendors = [vendors];
+            }
+            catch (err) {
+                console.warn('Failed to fetch vendors for overview:', err);
+            }
+            // 2. Fetch Users
+            let users = [];
+            try {
+                const uRes = yield (0, s4hana_1.s4hanaRequest)('GET', '/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/UsersSet?$top=5000', undefined, undefined, jwtToken);
+                users = ((_f = uRes.d) === null || _f === void 0 ? void 0 : _f.results) || uRes.d || [];
+                if (!Array.isArray(users))
+                    users = [users];
+            }
+            catch (err) {
+                console.warn('Failed to fetch users for overview:', err);
+            }
+            // 3. Fetch Attendance
+            let attendance = [];
+            try {
+                const attRes = yield (0, s4hana_1.s4hanaRequest)('GET', `/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/AttendanceSet?$filter=Timestamp ge '${startDateStr}' and Timestamp le '${todayStr}'&$top=10000`, undefined, undefined, jwtToken);
+                attendance = ((_g = attRes.d) === null || _g === void 0 ? void 0 : _g.results) || attRes.d || [];
+                if (!Array.isArray(attendance))
+                    attendance = [attendance];
+            }
+            catch (err) {
+                console.warn('Failed to fetch attendance for overview:', err);
+            }
+            // Aggregations
+            const totalVendors = vendors.length;
+            const totalUsers = users.length;
+            const vendorsList = vendors.map((v) => ({
+                code: v.Vendorcode || (0, exports.getProp)(v, 'vendorcode') || '',
+                name: v.Vendorname || (0, exports.getProp)(v, 'vendorname') || v.Vendorcode || ''
+            }));
+            // Active users: unique checked-in emails today
+            const todayLogs = attendance.filter((a) => (a.Timestamp || a.timestamp) === todayStr);
+            const todayActiveEmails = new Set(todayLogs.filter((a) => a.Type === 'IN').map((a) => (a.Email || a.email || '').toLowerCase()));
+            const todayActiveUsers = todayActiveEmails.size;
+            const todayInactiveUsers = Math.max(0, totalUsers - todayActiveUsers);
+            // Trend data (last 7 days)
+            const dailyActivity = dateArray.map(date => {
+                const dayLogs = attendance.filter((a) => (a.Timestamp || a.timestamp) === date);
+                const activeEmails = new Set(dayLogs.filter((a) => a.Type === 'IN').map((a) => (a.Email || a.email || '').toLowerCase()));
+                return {
+                    date,
+                    active: activeEmails.size
+                };
+            });
+            return res.json({
+                role: userRole,
+                stats: {
+                    totalVendors,
+                    totalUsers,
+                    todayActiveUsers,
+                    todayInactiveUsers
+                },
+                vendorsList,
+                dailyActivity
+            });
+        }
+        else if (userRole === 'VENDOR_ADMIN') {
+            // 1. Fetch Users under this vendor
+            let users = [];
+            try {
+                const uRes = yield (0, s4hana_1.s4hanaRequest)('GET', `/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/UsersSet?$filter=Vendorcode eq '${userVendorCode.toUpperCase()}'&$top=1000`, undefined, undefined, jwtToken);
+                users = ((_h = uRes.d) === null || _h === void 0 ? void 0 : _h.results) || uRes.d || [];
+                if (!Array.isArray(users))
+                    users = [users];
+            }
+            catch (err) {
+                console.warn('Failed to fetch vendor users for overview:', err);
+            }
+            // 2. Fetch Attendance for last 7 days under this vendor
+            let attendance = [];
+            try {
+                const attRes = yield (0, s4hana_1.s4hanaRequest)('GET', `/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/AttendanceSet?$filter=Vendorcode eq '${userVendorCode.toUpperCase()}' and Timestamp ge '${startDateStr}' and Timestamp le '${todayStr}'&$top=5000`, undefined, undefined, jwtToken);
+                attendance = ((_j = attRes.d) === null || _j === void 0 ? void 0 : _j.results) || attRes.d || [];
+                if (!Array.isArray(attendance))
+                    attendance = [attendance];
+            }
+            catch (err) {
+                console.warn('Failed to fetch vendor attendance for overview:', err);
+            }
+            const totalUsers = users.length;
+            // Active users under vendor today
+            const todayLogs = attendance.filter((a) => (a.Timestamp || a.timestamp) === todayStr);
+            const todayActiveEmails = new Set(todayLogs.filter((a) => a.Type === 'IN').map((a) => (a.Email || a.email || '').toLowerCase()));
+            const todayActiveUsers = todayActiveEmails.size;
+            const todayInactiveUsers = Math.max(0, totalUsers - todayActiveUsers);
+            // Trend data (last 7 days)
+            const dailyActivity = dateArray.map(date => {
+                const dayLogs = attendance.filter((a) => (a.Timestamp || a.timestamp) === date);
+                const activeEmails = new Set(dayLogs.filter((a) => a.Type === 'IN').map((a) => (a.Email || a.email || '').toLowerCase()));
+                return {
+                    date,
+                    active: activeEmails.size
+                };
+            });
+            return res.json({
+                role: userRole,
+                vendorCode: userVendorCode,
+                stats: {
+                    totalUsers,
+                    todayActiveUsers,
+                    todayInactiveUsers
+                },
+                dailyActivity
+            });
+        }
+        else {
+            // EMPLOYEE Overview
+            let attendance = [];
+            try {
+                const attRes = yield (0, s4hana_1.s4hanaRequest)('GET', `/sap/opu/odata/sap/Z_INOXGFL_SRV_SRV/AttendanceSet?$filter=Email eq '${userEmail}'&$top=5000`, undefined, undefined, jwtToken);
+                attendance = ((_k = attRes.d) === null || _k === void 0 ? void 0 : _k.results) || attRes.d || [];
+                if (!Array.isArray(attendance))
+                    attendance = [attendance];
+            }
+            catch (err) {
+                console.warn('Failed to fetch employee attendance for overview:', err);
+            }
+            // Group by date to pair check-in/out
+            const dailyLogs = {};
+            attendance.forEach((a) => {
+                const date = a.Timestamp || a.timestamp;
+                if (!date)
+                    return;
+                if (!dailyLogs[date]) {
+                    dailyLogs[date] = { checkIn: null, clockOut: null, hours: 0, status: a.Status || 'PENDING' };
+                }
+                if (a.Type === 'IN') {
+                    dailyLogs[date].checkIn = a.Worktime;
+                }
+                if (a.Type === 'OUT') {
+                    dailyLogs[date].clockOut = a.Worktime;
+                    const hrs = parseFloat((0, exports.getProp)(a, 'hoursworked') || '0');
+                    dailyLogs[date].hours = hrs;
+                }
+                if (a.Status && a.Status !== 'PENDING') {
+                    dailyLogs[date].status = a.Status;
+                }
+            });
+            const uniqueDates = Object.keys(dailyLogs);
+            const totalDaysWorked = uniqueDates.length;
+            let totalHoursWorked = 0;
+            uniqueDates.forEach(d => {
+                totalHoursWorked += dailyLogs[d].hours;
+            });
+            const averageDailyHours = totalDaysWorked > 0 ? parseFloat((totalHoursWorked / totalDaysWorked).toFixed(2)) : 0;
+            // Check today's status
+            const todayLogs = dailyLogs[todayStr] || { checkIn: null, clockOut: null, hours: 0, status: 'PENDING' };
+            let todayStatus = 'not-started';
+            if (todayLogs.checkIn && todayLogs.clockOut) {
+                todayStatus = 'checked-out';
+            }
+            else if (todayLogs.checkIn) {
+                todayStatus = 'checked-in';
+            }
+            // Map recent attendance history (last 7 logs)
+            const formatTime = (timeStr) => {
+                if (!timeStr)
+                    return '-';
+                const match = timeStr.match(/PT(\d+H)?(\d+M)?(\d+S)?/);
+                if (match) {
+                    const h = (match[1] || '00H').replace('H', '').padStart(2, '0');
+                    const m = (match[2] || '00M').replace('M', '').padStart(2, '0');
+                    return `${h}:${m}`;
+                }
+                return timeStr;
+            };
+            const recentAttendance = uniqueDates
+                .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())
+                .slice(0, 7)
+                .map(date => {
+                const log = dailyLogs[date];
+                return {
+                    date,
+                    clockIn: formatTime(log.checkIn),
+                    clockOut: formatTime(log.clockOut),
+                    hours: log.hours.toFixed(2),
+                    status: log.status
+                };
+            });
+            return res.json({
+                role: userRole,
+                stats: {
+                    totalDaysWorked,
+                    totalHoursWorked: parseFloat(totalHoursWorked.toFixed(2)),
+                    averageDailyHours,
+                    todayStatus,
+                    todayCheckIn: formatTime(todayLogs.checkIn),
+                    todayCheckOut: formatTime(todayLogs.clockOut)
+                },
+                recentAttendance
+            });
+        }
+    }
+    catch (error) {
+        console.error('getOverviewStats Error:', error);
+        res.status(500).json({ message: 'Error generating overview statistics', error: error.message });
+    }
+});
+exports.getOverviewStats = getOverviewStats;
