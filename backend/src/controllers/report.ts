@@ -531,10 +531,6 @@ export const getOverviewStats = async (req: AuthRequest, res: Response) => {
       // Aggregations
       const totalVendors = vendors.length;
       const totalUsers = users.length;
-      const vendorsList = vendors.map((v: any) => ({
-        code: v.Vendorcode || getProp(v, 'vendorcode') || '',
-        name: v.Vendorname || getProp(v, 'vendorname') || v.Vendorcode || ''
-      }));
 
       // Active users: unique checked-in emails today
       const todayLogs = attendance.filter((a: any) => (a.Timestamp || a.timestamp) === todayStr);
@@ -543,6 +539,34 @@ export const getOverviewStats = async (req: AuthRequest, res: Response) => {
       );
       const todayActiveUsers = todayActiveEmails.size;
       const todayInactiveUsers = Math.max(0, totalUsers - todayActiveUsers);
+
+      const vendorsList = vendors.map((v: any) => {
+        const vCode = (v.Vendorcode || getProp(v, 'vendorcode') || '').toString().trim().toUpperCase();
+        const vName = v.Vendorname || getProp(v, 'vendorname') || vCode;
+        
+        // Filter users belonging to this vendor
+        const vUsers = users.filter((u: any) => (getProp(u, 'vendorcode') || '').toString().trim().toUpperCase() === vCode);
+        const vTotalUsers = vUsers.length;
+
+        // Filter active logs for today for this vendor
+        const vTodayLogs = todayLogs.filter((a: any) => {
+          const aVCode = (a.Vendorcode || getProp(a, 'vendorcode') || '').toString().trim().toUpperCase();
+          return aVCode === vCode;
+        });
+        const vActiveEmails = new Set(
+          vTodayLogs.filter((a: any) => a.Type === 'IN').map((a: any) => (a.Email || a.email || '').toLowerCase())
+        );
+        const vActiveUsers = vActiveEmails.size;
+        const vInactiveUsers = Math.max(0, vTotalUsers - vActiveUsers);
+
+        return {
+          code: vCode,
+          name: vName,
+          totalUsers: vTotalUsers,
+          activeUsers: vActiveUsers,
+          inactiveUsers: vInactiveUsers
+        };
+      });
 
       // Trend data (last 7 days)
       const dailyActivity = dateArray.map(date => {
