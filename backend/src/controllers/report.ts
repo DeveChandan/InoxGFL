@@ -536,10 +536,16 @@ export const getOverviewStats = async (req: AuthRequest, res: Response) => {
       const totalVendors = vendors.length;
       const totalUsers = users.length;
 
-      // Active users: unique checked-in emails today
+      // Active users today: unique clocked-in emails today who have NOT clocked out today
       const todayLogs = attendance.filter((a: any) => (a.Timestamp || a.timestamp) === todayStr);
-      const todayActiveEmails = new Set(
+      const todayInEmails = new Set(
         todayLogs.filter((a: any) => a.Type === 'IN').map((a: any) => (a.Email || a.email || '').toLowerCase())
+      );
+      const todayOutEmails = new Set(
+        todayLogs.filter((a: any) => a.Type === 'OUT').map((a: any) => (a.Email || a.email || '').toLowerCase())
+      );
+      const todayActiveEmails = new Set(
+        Array.from(todayInEmails).filter(email => !todayOutEmails.has(email))
       );
       const todayActiveUsers = todayActiveEmails.size;
       const todayInactiveUsers = Math.max(0, totalUsers - todayActiveUsers);
@@ -562,8 +568,15 @@ export const getOverviewStats = async (req: AuthRequest, res: Response) => {
           const aVCode = (a.Vendorcode || getProp(a, 'vendorcode') || '').toString().trim().toUpperCase();
           return uVCode === vCode || aVCode === vCode;
         });
-        const vActiveEmails = new Set(
+
+        const vInEmails = new Set(
           vTodayLogs.filter((a: any) => a.Type === 'IN').map((a: any) => (a.Email || a.email || '').toLowerCase())
+        );
+        const vOutEmails = new Set(
+          vTodayLogs.filter((a: any) => a.Type === 'OUT').map((a: any) => (a.Email || a.email || '').toLowerCase())
+        );
+        const vActiveEmails = new Set(
+          Array.from(vInEmails).filter(email => !vOutEmails.has(email))
         );
         const vActiveUsers = vActiveEmails.size;
         const vInactiveUsers = Math.max(0, vTotalUsers - vActiveUsers);
@@ -618,6 +631,9 @@ export const getOverviewStats = async (req: AuthRequest, res: Response) => {
         console.warn('Failed to fetch vendor users for overview:', err);
       }
 
+      // SECURITY SAFEGUARD: filter out any users not belonging to caller's vendor code (solves OData filter bypass)
+      users = users.filter((u: any) => (getProp(u, 'vendorcode') || '').toString().trim().toUpperCase() === userVendorCode.toUpperCase());
+
       // 2. Fetch all Attendance for the last 7 days (filtered in Node.js to solve missing vendor_code field in logs)
       let attendance: any[] = [];
       try {
@@ -644,10 +660,16 @@ export const getOverviewStats = async (req: AuthRequest, res: Response) => {
         return userEmails.has(aEmail) || aVCode === userVendorCode.toUpperCase();
       });
 
-      // Active users under vendor today
+      // Active users under vendor today: clock-in but not clock-out today
       const todayLogs = vendorAttendance.filter((a: any) => (a.Timestamp || a.timestamp) === todayStr);
-      const todayActiveEmails = new Set(
+      const todayInEmails = new Set(
         todayLogs.filter((a: any) => a.Type === 'IN').map((a: any) => (a.Email || a.email || '').toLowerCase())
+      );
+      const todayOutEmails = new Set(
+        todayLogs.filter((a: any) => a.Type === 'OUT').map((a: any) => (a.Email || a.email || '').toLowerCase())
+      );
+      const todayActiveEmails = new Set(
+        Array.from(todayInEmails).filter(email => !todayOutEmails.has(email))
       );
       const todayActiveUsers = todayActiveEmails.size;
       const todayInactiveUsers = Math.max(0, totalUsers - todayActiveUsers);
