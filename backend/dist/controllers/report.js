@@ -523,12 +523,10 @@ const getOverviewStats = (req, res) => __awaiter(void 0, void 0, void 0, functio
             // Aggregations
             const totalVendors = vendors.length;
             const totalUsers = users.length;
-            // Active users today: unique clocked-in emails today who have NOT clocked out today
+            // Active users today: unique emails who clocked in today
             const todayLogs = attendance.filter((a) => (a.Timestamp || a.timestamp) === todayStr);
             const todayInEmails = new Set(todayLogs.filter((a) => a.Type === 'IN').map((a) => (a.Email || a.email || '').toLowerCase()));
-            const todayOutEmails = new Set(todayLogs.filter((a) => a.Type === 'OUT').map((a) => (a.Email || a.email || '').toLowerCase()));
-            const todayActiveEmails = new Set(Array.from(todayInEmails).filter(email => !todayOutEmails.has(email)));
-            const todayActiveUsers = todayActiveEmails.size;
+            const todayActiveUsers = todayInEmails.size;
             const todayInactiveUsers = Math.max(0, totalUsers - todayActiveUsers);
             const vendorsList = vendors.map((v) => {
                 const vCode = (v.Vendorcode || (0, exports.getProp)(v, 'vendorcode') || '').toString().trim().toUpperCase();
@@ -546,9 +544,7 @@ const getOverviewStats = (req, res) => __awaiter(void 0, void 0, void 0, functio
                     return uVCode === vCode || aVCode === vCode;
                 });
                 const vInEmails = new Set(vTodayLogs.filter((a) => a.Type === 'IN').map((a) => (a.Email || a.email || '').toLowerCase()));
-                const vOutEmails = new Set(vTodayLogs.filter((a) => a.Type === 'OUT').map((a) => (a.Email || a.email || '').toLowerCase()));
-                const vActiveEmails = new Set(Array.from(vInEmails).filter(email => !vOutEmails.has(email)));
-                const vActiveUsers = vActiveEmails.size;
+                const vActiveUsers = vInEmails.size;
                 const vInactiveUsers = Math.max(0, vTotalUsers - vActiveUsers);
                 return {
                     code: vCode,
@@ -579,7 +575,7 @@ const getOverviewStats = (req, res) => __awaiter(void 0, void 0, void 0, functio
                 dailyActivity
             });
         }
-        else if (userRole === 'VENDOR_ADMIN' || userVendorCode) {
+        else if (userRole === 'VENDOR_ADMIN') {
             // 1. Fetch Users under this vendor
             let users = [];
             try {
@@ -612,12 +608,10 @@ const getOverviewStats = (req, res) => __awaiter(void 0, void 0, void 0, functio
                 const aVCode = (a.Vendorcode || (0, exports.getProp)(a, 'vendorcode') || '').toString().trim().toUpperCase();
                 return userEmails.has(aEmail) || aVCode === userVendorCode.toUpperCase();
             });
-            // Active users under vendor today: clock-in but not clock-out today
+            // Active users under vendor today: unique emails who clocked in today
             const todayLogs = vendorAttendance.filter((a) => (a.Timestamp || a.timestamp) === todayStr);
             const todayInEmails = new Set(todayLogs.filter((a) => a.Type === 'IN').map((a) => (a.Email || a.email || '').toLowerCase()));
-            const todayOutEmails = new Set(todayLogs.filter((a) => a.Type === 'OUT').map((a) => (a.Email || a.email || '').toLowerCase()));
-            const todayActiveEmails = new Set(Array.from(todayInEmails).filter(email => !todayOutEmails.has(email)));
-            const todayActiveUsers = todayActiveEmails.size;
+            const todayActiveUsers = todayInEmails.size;
             const todayInactiveUsers = Math.max(0, totalUsers - todayActiveUsers);
             // Trend data (last 7 days)
             const dailyActivity = dateArray.map(date => {

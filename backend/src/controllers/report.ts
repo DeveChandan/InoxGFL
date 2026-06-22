@@ -602,7 +602,7 @@ export const getOverviewStats = async (req: AuthRequest, res: Response) => {
         dailyActivity
       });
 
-    } else if (userRole === 'VENDOR_ADMIN' || userVendorCode) {
+    } else if (userRole === 'VENDOR_ADMIN') {
       // 1. Fetch Users under this vendor
       let users: any[] = [];
       try {
