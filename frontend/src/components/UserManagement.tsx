@@ -74,6 +74,51 @@ const UserManagement = () => {
     setFormError('');
     setFormLoading(true);
     
+    // Client-side validations
+    if (!name || name.trim().length > 40) {
+      setFormError('Full Name is required and must be maximum 40 characters.');
+      setFormLoading(false);
+      return;
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!email || !emailRegex.test(email) || email.length > 100) {
+      setFormError('A valid Email Address is required and must be maximum 100 characters.');
+      setFormLoading(false);
+      return;
+    }
+    if (!password || password.length > 100) {
+      setFormError('Password is required and must be maximum 100 characters.');
+      setFormLoading(false);
+      return;
+    }
+    if (vendorMail && (!emailRegex.test(vendorMail) || vendorMail.length > 100)) {
+      setFormError('Vendor Email must be a valid email format and maximum 100 characters.');
+      setFormLoading(false);
+      return;
+    }
+    if (vendorDomain && vendorDomain.length > 40) {
+      setFormError('Vendor Domain must be maximum 40 characters.');
+      setFormLoading(false);
+      return;
+    }
+    if (onboardingDate && onboardingDate.length > 10) {
+      setFormError('Onboarding Date must be maximum 10 characters.');
+      setFormLoading(false);
+      return;
+    }
+    if (offboardingDate && offboardingDate.length > 10) {
+      setFormError('Offboarding Date must be maximum 10 characters.');
+      setFormLoading(false);
+      return;
+    }
+    if (onboardingDate && offboardingDate) {
+      if (new Date(onboardingDate) > new Date(offboardingDate)) {
+        setFormError('Onboarding Date cannot be after Offboarding Date.');
+        setFormLoading(false);
+        return;
+      }
+    }
+    
     try {
       await api.post('/user', { 
         name, 
@@ -108,7 +153,11 @@ const UserManagement = () => {
       setOffboardingDate('');
       fetchUsers();
     } catch (err: any) {
-      setFormError(err.response?.data?.message || 'Failed to create user');
+      const detailedErr = err.response?.data?.error;
+      const parsedErr = detailedErr && typeof detailedErr === 'string'
+        ? detailedErr.replace(/^Failed to communicate with S\/4HANA:\s*/i, '')
+        : null;
+      setFormError(parsedErr || err.response?.data?.message || 'Failed to create user');
     } finally {
       setFormLoading(false);
     }
@@ -440,21 +489,21 @@ const UserManagement = () => {
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1">Full Name *</label>
                 <input 
-                  type="text" required value={name} onChange={(e) => setName(e.target.value)}
+                  type="text" required value={name} onChange={(e) => setName(e.target.value)} maxLength={40}
                   className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary outline-none text-slate-900"
                 />
               </div>
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1">Email Address *</label>
                 <input 
-                  type="email" required value={email} onChange={(e) => setEmail(e.target.value)}
+                  type="email" required value={email} onChange={(e) => setEmail(e.target.value)} maxLength={100}
                   className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary outline-none text-slate-900"
                 />
               </div>
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1">Password *</label>
                 <input 
-                  type="password" required value={password} onChange={(e) => setPassword(e.target.value)}
+                  type="password" required value={password} onChange={(e) => setPassword(e.target.value)} maxLength={100}
                   className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary outline-none text-slate-900"
                 />
               </div>
@@ -544,7 +593,7 @@ const UserManagement = () => {
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1">Vendor Email</label>
                 <input 
-                  type="email" value={vendorMail} onChange={(e) => setVendorMail(e.target.value)}
+                  type="email" value={vendorMail} onChange={(e) => setVendorMail(e.target.value)} maxLength={100}
                   placeholder="name@vendor.com"
                   className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary outline-none text-slate-900"
                 />
@@ -553,7 +602,7 @@ const UserManagement = () => {
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1">Vendor Domain</label>
                 <input 
-                  type="text" value={vendorDomain} onChange={(e) => setVendorDomain(e.target.value)}
+                  type="text" value={vendorDomain} onChange={(e) => setVendorDomain(e.target.value)} maxLength={40}
                   placeholder="vendor.com"
                   className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary outline-none text-slate-900"
                 />
@@ -561,10 +610,11 @@ const UserManagement = () => {
               
 
 
+
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1">Onboarding Date</label>
                 <input 
-                  type="date" value={onboardingDate} onChange={(e) => setOnboardingDate(e.target.value)}
+                  type="date" value={onboardingDate} onChange={(e) => setOnboardingDate(e.target.value)} maxLength={10}
                   className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary outline-none text-slate-900"
                 />
               </div>
@@ -572,7 +622,7 @@ const UserManagement = () => {
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1">Offboarding Date</label>
                 <input 
-                  type="date" value={offboardingDate} onChange={(e) => setOffboardingDate(e.target.value)}
+                  type="date" value={offboardingDate} onChange={(e) => setOffboardingDate(e.target.value)} maxLength={10}
                   className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary outline-none text-slate-900"
                 />
               </div>

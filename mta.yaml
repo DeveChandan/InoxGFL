@@ -7,11 +7,27 @@ parameters:
   enable-parallel-deployments: true
 
 modules:
+  - name: inoxgfl-frontend
+    type: html5
+    path: frontend
+    build-parameters:
+      builder: custom
+      commands:
+        - npm install
+        - npm run build
+      build-result: dist
+      supported-platforms: []
+
   - name: inoxgfl-approuter
     type: nodejs
     path: approuter
     build-parameters:
       builder: zip
+      requires:
+        - name: inoxgfl-frontend
+          artifacts:
+            - '*'
+          target-path: dist
     parameters:
       disk-quota: 256M
       memory: 256M

@@ -41,6 +41,58 @@ const VendorManagement = () => {
     setFormError('');
     setFormLoading(true);
     
+    // Client-side validations
+    if (!vendorCode || vendorCode.trim().length > 10) {
+      setFormError('Vendor Code is required and must be maximum 10 characters.');
+      setFormLoading(false);
+      return;
+    }
+    if (!vendorName || vendorName.trim().length > 40) {
+      setFormError('Vendor Name is required and must be maximum 40 characters.');
+      setFormLoading(false);
+      return;
+    }
+    if (totalEmp) {
+      const empNum = Number(totalEmp);
+      if (isNaN(empNum) || empNum < 0 || !Number.isInteger(empNum) || totalEmp.length > 5) {
+        setFormError('Total Employees must be a positive integer and maximum 5 digits.');
+        setFormLoading(false);
+        return;
+      }
+    }
+    if (rate) {
+      const rateNum = Number(rate);
+      if (isNaN(rateNum) || rateNum < 0 || rate.length > 10) {
+        setFormError('Rate must be a positive number and maximum 10 characters.');
+        setFormLoading(false);
+        return;
+      }
+    }
+    if (contractPerson && contractPerson.length > 40) {
+      setFormError('Contact Person must be maximum 40 characters.');
+      setFormLoading(false);
+      return;
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (contactEmail && (!emailRegex.test(contactEmail) || contactEmail.length > 100)) {
+      setFormError('Contact Email must be a valid email format and maximum 100 characters.');
+      setFormLoading(false);
+      return;
+    }
+    if (contactPhone) {
+      const phoneRegex = /^\d+$/;
+      if (!phoneRegex.test(contactPhone) || contactPhone.length > 10) {
+        setFormError('Contact Phone must contain only numbers and be maximum 10 digits.');
+        setFormLoading(false);
+        return;
+      }
+    }
+    if (contactAddress && contactAddress.length > 255) {
+      setFormError('Contact Address must be maximum 255 characters.');
+      setFormLoading(false);
+      return;
+    }
+
     try {
       await api.post('/vendor', { 
         vendor_code: vendorCode, 
@@ -63,7 +115,11 @@ const VendorManagement = () => {
       setContactAddress('');
       fetchVendors();
     } catch (err: any) {
-      setFormError(err.response?.data?.message || 'Failed to create vendor');
+      const detailedErr = err.response?.data?.error;
+      const parsedErr = detailedErr && typeof detailedErr === 'string'
+        ? detailedErr.replace(/^Failed to communicate with S\/4HANA:\s*/i, '')
+        : null;
+      setFormError(parsedErr || err.response?.data?.message || 'Failed to create vendor');
     } finally {
       setFormLoading(false);
     }
@@ -128,7 +184,7 @@ const VendorManagement = () => {
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1">Vendor Code *</label>
                 <input 
-                  type="text" required value={vendorCode} onChange={(e) => setVendorCode(e.target.value)}
+                  type="text" required value={vendorCode} onChange={(e) => setVendorCode(e.target.value)} maxLength={10}
                   placeholder="e.g. V-101"
                   className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary outline-none text-slate-900"
                 />
@@ -136,7 +192,7 @@ const VendorManagement = () => {
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1">Vendor Name *</label>
                 <input 
-                  type="text" required value={vendorName} onChange={(e) => setVendorName(e.target.value)}
+                  type="text" required value={vendorName} onChange={(e) => setVendorName(e.target.value)} maxLength={40}
                   placeholder="e.g. Acme Corp"
                   className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary outline-none text-slate-900"
                 />
@@ -161,7 +217,7 @@ const VendorManagement = () => {
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1">Contact Person</label>
                 <input 
-                  type="text" value={contractPerson} onChange={(e) => setContractPerson(e.target.value)}
+                  type="text" value={contractPerson} onChange={(e) => setContractPerson(e.target.value)} maxLength={40}
                   placeholder="John Doe"
                   className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary outline-none text-slate-900"
                 />
@@ -169,7 +225,7 @@ const VendorManagement = () => {
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1">Contact Email</label>
                 <input 
-                  type="email" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)}
+                  type="email" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} maxLength={100}
                   placeholder="john@example.com"
                   className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary outline-none text-slate-900"
                 />
@@ -177,7 +233,7 @@ const VendorManagement = () => {
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1">Contact Phone</label>
                 <input 
-                  type="text" value={contactPhone} onChange={(e) => setContactPhone(e.target.value)}
+                  type="text" value={contactPhone} onChange={(e) => setContactPhone(e.target.value)} maxLength={10}
                   placeholder="90000000000"
                   className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary outline-none text-slate-900"
                 />
@@ -185,7 +241,7 @@ const VendorManagement = () => {
               <div className="lg:col-span-3">
                 <label className="block text-sm font-semibold text-slate-700 mb-1">Contact Address</label>
                 <textarea 
-                  value={contactAddress} onChange={(e) => setContactAddress(e.target.value)}
+                  value={contactAddress} onChange={(e) => setContactAddress(e.target.value)} maxLength={255}
                   placeholder="123 Main St, City..."
                   className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary outline-none text-slate-900"
                   rows={2}
